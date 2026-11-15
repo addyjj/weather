@@ -19,7 +19,7 @@ from `Weather.Api`. Both hosts share the application and infrastructure projects
 Start the device API from the repository root (after building):
 
 ```powershell
-dotnet run --project src/Weather.WebApi --no-build --no-launch-profile
+dotnet run --project src/Weather.WebApi --no-build --no-launch-profile -- --Https:RedirectEnabled=false
 ```
 
 The default address is **http://localhost:5001**, so it can run alongside the MCP
@@ -59,7 +59,8 @@ combination, matching Weather.Api's cache duration. These endpoints read Ambient
 Weather directly and do not need SQL configuration. Upstream failures return
 HTTP 502 Problem Details without upstream response bodies or credentials.
 The REST host defaults to loopback with local hostnames and does not enable CORS
-or authentication. Configure HTTPS and access controls before remote hosting.
+until origins are configured. HTTPS redirection is enabled by default; the command
+above disables it for the HTTP-only local proxy. Authentication is not configured.
 The host also exposes SignalR at `/weatherHub`, broadcasting `weatherData` events
 with the same reading contract as the REST endpoints. An Infrastructure adapter
 subscribes to Ambient's real-time Socket.IO feed, while a host background service
@@ -75,6 +76,54 @@ as above to use port 5001, then run `npm run dev` from `weather-ui`. Set
 Its `npm run test:e2e` command uses Playwright, the real API host, and a local
 Ambient HTTP/Socket.IO stub to verify initial readings, live updates, reconnects,
 and loading/empty/error states without live credentials.
+
+## Separate UI hosting, HTTPS, and User Secrets
+
+Set allowed UI origins on the REST host using `Cors:AllowedOrigins` in settings,
+or indexed environment variables:
+
+```text
+Cors__AllowedOrigins__0=https://weather-ui.example.com
+Cors__AllowedOrigins__1=http://localhost:5173
+```
+
+Origins include scheme, hostname, and port, with no path or trailing slash. Only
+listed origins receive CORS headers. An empty list (the default) grants no
+cross-origin browser access. The policy permits all HTTP methods and headers,
+including SignalR negotiation headers, and does not enable credentialed cookies.
+The UI's SignalR client already uses `withCredentials: false`.
+On the separately hosted UI, set `VITE_API_BASE_URL` to the API's HTTPS address
+without `/api`, for example `https://weather-api.example.com`. Restart/rebuild the
+UI after changing its Vite environment. Its existing `/api` proxy remains supported.
+
+The REST host runs HTTPS redirection by default. Kestrel can discover the HTTPS
+port from its configured HTTPS listener; set `Https__Port` explicitly when needed.
+HTTP requests receive a 307 redirect preserving their path and query string.
+For local HTTPS, trust the SDK certificate with `dotnet dev-certs https --trust`
+and use the HTTPS launch profile URL. Redirection does not provision a certificate.
+For HTTP-only local development set `Https__RedirectEnabled=false`. For a reverse
+proxy or App Service that already enforces HTTPS, disable backend redirection and
+enforce HTTPS at that boundary to avoid redirect loops. Separately hosted browsers
+should call the HTTPS API URL directly, including preflight requests.
+
+The REST, MCP, and import hosts share a development User Secrets ID. Configure
+settings once through any of those projects:
+
+```powershell
+dotnet user-secrets set 'Ambient:ApiKey' 'your-api-key' --project src/Weather.WebApi
+dotnet user-secrets set 'Ambient:ApplicationKey' 'your-application-key' --project src/Weather.WebApi
+dotnet user-secrets set 'Ambient:DeviceMacAddress' 'your-station-mac' --project src/Weather.WebApi
+dotnet user-secrets set 'ConnectionStrings:sql' 'your-sql-connection' --project src/Weather.WebApi
+$env:DOTNET_ENVIRONMENT = 'Development'
+dotnet run --project src/Weather.WebApi --no-launch-profile -- --Https:RedirectEnabled=false
+```
+
+User Secrets load only in Development and stay outside the repository. They are
+a developer convenience, not an encrypted production secret store. Configuration
+priority, highest first, is command-line arguments, environment variables,
+Development User Secrets, ignored local settings, and ordinary appsettings files.
+Existing ignored local settings continue to work. EF migration tooling still
+reads its SQL connection from the environment; it does not load host User Secrets.
 
 ## Health endpoints
 

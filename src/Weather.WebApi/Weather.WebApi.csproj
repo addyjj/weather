@@ -1,4 +1,7 @@
 <Project Sdk="Microsoft.NET.Sdk.Web">
+  <PropertyGroup>
+    <UserSecretsId>Weather.LocalDevelopment-5a1e28cc-a746-47b6-a5b6-d41a07597c69</UserSecretsId>
+  </PropertyGroup>
   <ItemGroup>
     <ProjectReference Include="../Weather.UseCases/Weather.UseCases.csproj" />
     <ProjectReference Include="../Weather.Infrastructure/Weather.Infrastructure.csproj" />

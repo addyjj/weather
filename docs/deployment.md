@@ -106,8 +106,23 @@ credentials are excluded from both image contexts and published app artifacts.
 
 The sibling UI's Vite proxy continues to use `http://localhost:5001`; set
 `WEATHER_API_URL` in the UI process if the mapped API port changes. Production UI
-hosting needs a reverse proxy forwarding `/api` (including WebSockets) to the API
-with the prefix stripped, or deliberate cross-origin configuration.
+hosting can use a reverse proxy forwarding `/api` (including WebSockets) to the API
+with the prefix stripped. To call the API directly from a different origin, set
+`VITE_API_BASE_URL` on the UI to the API's HTTPS address and configure
+`Cors__AllowedOrigins__0` on the REST host to the UI origin (additional origins use
+indices 1, 2, etc.). Compose exposes the first origin through `WEATHER_UI_ORIGIN`.
+Only listed origins receive CORS headers; credentialed cookies are not enabled.
+The existing UI's SignalR client uses `withCredentials: false`.
+
+The REST host enables HTTPS redirection by default, with an optional `Https__Port`.
+The HTTP-only container image and Compose stack explicitly disable backend
+redirection. `WEATHER_HTTPS_REDIRECT_ENABLED` can override that Compose setting
+when providing a real HTTPS listener/certificate. With TLS terminated at a reverse
+proxy, enforce HTTPS there and leave backend redirection disabled. User Secrets
+are available to all three hosts in Development, share the same local secret
+store, and are never copied into containers or deployment artifacts. Production
+uses environment/App Service settings instead. See the README for secret commands
+and configuration precedence.
 
 ## GitHub Actions and Azure App Service
 
@@ -151,6 +166,8 @@ container; it is not started as an App Service.
 Use Linux App Services with the .NET 10 runtime. Configure their startup command as
 `dotnet Weather.WebApi.dll` or `dotnet Weather.Mcp.dll`, and set
 `ASPNETCORE_URLS=http://0.0.0.0:8080` (or the port required by the selected host).
+Enable App Service's HTTPS-only setting and set `Https__RedirectEnabled=false`
+for the HTTP backend to avoid redirect loops after TLS termination.
 Set `AllowedHosts` to each app's actual hostname, and configure
 `ConnectionStrings__sql`, `Ambient__ApiKey`, `Ambient__ApplicationKey`,
 `Ambient__DeviceMacAddress`, and any custom Ambient URLs as App Service settings.

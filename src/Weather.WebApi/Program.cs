@@ -10,14 +10,20 @@ using Weather.Infrastructure.HealthChecks;
 using Weather.WebApi.HealthChecks;
 
 var builder = WebApplication.CreateBuilder(args);
+builder.Configuration.AddJsonFile(Path.Combine(AppContext.BaseDirectory, "appsettings.Local.json"), optional: true);
+if (builder.Environment.IsDevelopment()) builder.Configuration.AddUserSecrets<Program>(optional: true);
 builder.Configuration
-    .AddJsonFile(Path.Combine(AppContext.BaseDirectory, "appsettings.Local.json"), optional: true)
     .AddEnvironmentVariables()
     .AddCommandLine(args);
 builder.WebHost.UseUrls(builder.Configuration["urls"] ?? "http://localhost:5001");
 builder.Configuration["AllowedHosts"] ??= "localhost;127.0.0.1;[::1]";
 builder.Services.AddControllers();
 builder.Services.AddSignalR();
+var allowedOrigins = builder.Configuration.GetSection("Cors:AllowedOrigins").Get<string[]>()?
+    .Where(origin => !string.IsNullOrWhiteSpace(origin)).Select(origin => origin.Trim()).ToArray() ?? [];
+builder.Services.AddCors(options => options.AddPolicy("WeatherUi", policy =>
+    policy.WithOrigins(allowedOrigins).AllowAnyMethod().AllowAnyHeader()));
+builder.Services.AddHttpsRedirection(options => options.HttpsPort = builder.Configuration.GetValue<int?>("Https:Port"));
 builder.Services.AddTransient<IWeatherUpdateStream, AmbientWeatherUpdateStream>();
 builder.Services.AddTransient<StreamWeatherUpdatesHandler>();
 builder.Services.AddHostedService<WeatherBroadcastService>();
@@ -34,6 +40,9 @@ builder.Services.AddHealthChecks()
     .AddCheck<AmbientWeatherApiHealthCheck>("ambient_weather_api", tags: ["detail"], timeout: TimeSpan.FromSeconds(10));
 
 await using var app = builder.Build();
+if (builder.Configuration.GetValue("Https:RedirectEnabled", true)) app.UseHttpsRedirection();
+app.UseRouting();
+if (allowedOrigins.Length > 0) app.UseCors("WeatherUi");
 app.Use(async (context, next) =>
 {
     try { await next(context); }

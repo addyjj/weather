@@ -19,6 +19,8 @@ services:
       ASPNETCORE_ENVIRONMENT: Production
       ASPNETCORE_URLS: http://+:8080
       AllowedHosts: ${WEATHER_ALLOWED_HOSTS:-localhost;127.0.0.1;[::1];weather.webapi}
+      Cors__AllowedOrigins__0: ${WEATHER_UI_ORIGIN:-}
+      Https__RedirectEnabled: ${WEATHER_HTTPS_REDIRECT_ENABLED:-false}
     ports:
       - "127.0.0.1:${WEATHER_API_PORT:-5001}:8080"
     restart: unless-stopped

@@ -13,8 +13,9 @@ using Weather.Mcp.Tools;
 using Weather.UseCases.CurrentConditions.GetCurrentConditions;
 
 var builder = WebApplication.CreateBuilder(args);
+builder.Configuration.AddJsonFile(Path.Combine(AppContext.BaseDirectory, "appsettings.Local.json"), optional: true);
+if (builder.Environment.IsDevelopment()) builder.Configuration.AddUserSecrets<Program>(optional: true);
 builder.Configuration
-    .AddJsonFile(Path.Combine(AppContext.BaseDirectory, "appsettings.Local.json"), optional: true)
     .AddEnvironmentVariables()
     .AddCommandLine(args);
 builder.Services.AddSerilog((services, logging) => logging

@@ -16,8 +16,9 @@ if (args.Contains("--help") || args.Contains("-h"))
 }
 
 var builder = Host.CreateApplicationBuilder(args);
-builder.Configuration.AddJsonFile(Path.Combine(AppContext.BaseDirectory, "appsettings.Local.json"), optional: true)
-    .AddEnvironmentVariables().AddCommandLine(args);
+builder.Configuration.AddJsonFile(Path.Combine(AppContext.BaseDirectory, "appsettings.Local.json"), optional: true);
+if (builder.Environment.IsDevelopment()) builder.Configuration.AddUserSecrets<Program>(optional: true);
+builder.Configuration.AddEnvironmentVariables().AddCommandLine(args);
 var ambient = builder.Configuration.GetSection("Ambient").Get<AmbientWeatherOptions>() ?? new();
 var macAddress = builder.Configuration["macAddress"] ?? ambient.DeviceMacAddress;
 var connectionString = builder.Configuration.GetConnectionString("sql");

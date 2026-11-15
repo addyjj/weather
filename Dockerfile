@@ -23,6 +23,7 @@ USER $APP_UID
 EXPOSE 8080
 
 FROM runtime AS webapi
+ENV Https__RedirectEnabled=false
 COPY --from=build /out/webapi/ ./
 ENTRYPOINT ["dotnet", "Weather.WebApi.dll"]
 

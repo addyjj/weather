@@ -24,11 +24,13 @@ internal sealed class HttpMcpServer : IAsyncDisposable
     public static Task<HttpMcpServer> StartAsync(IReadOnlyDictionary<string, string?> environment, CancellationToken ct) =>
         StartHostAsync(environment, "Weather.Mcp", "MCP ready at ", ct);
 
-    public static Task<HttpMcpServer> StartRestAsync(IReadOnlyDictionary<string, string?> environment, CancellationToken ct) =>
-        StartHostAsync(environment, "Weather.WebApi", "REST API ready at ", ct);
+    public static Task<HttpMcpServer> StartRestAsync(IReadOnlyDictionary<string, string?> environment, CancellationToken ct,
+        IReadOnlyList<string>? args = null) =>
+        StartHostAsync(environment, "Weather.WebApi", "REST API ready at ", ct, args);
 
     private static async Task<HttpMcpServer> StartHostAsync(
-        IReadOnlyDictionary<string, string?> environment, string host, string marker, CancellationToken ct)
+        IReadOnlyDictionary<string, string?> environment, string host, string marker, CancellationToken ct,
+        IReadOnlyList<string>? args = null)
     {
         var root = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "../../../../../"));
         var configuration = new DirectoryInfo(AppContext.BaseDirectory).Parent!.Name;
@@ -40,10 +42,11 @@ internal sealed class HttpMcpServer : IAsyncDisposable
             WorkingDirectory = Path.GetDirectoryName(serverPath)!
         };
         info.ArgumentList.Add(serverPath);
+        foreach (var arg in args ?? []) info.ArgumentList.Add(arg);
         foreach (var entry in environment) info.Environment[entry.Key] = entry.Value;
         info.Environment["ASPNETCORE_URLS"] = "http://127.0.0.1:0";
-        info.Environment["ASPNETCORE_ENVIRONMENT"] = "Production";
-        info.Environment["DOTNET_ENVIRONMENT"] = "Production";
+        info.Environment["ASPNETCORE_ENVIRONMENT"] = environment.GetValueOrDefault("ASPNETCORE_ENVIRONMENT") ?? "Production";
+        info.Environment["DOTNET_ENVIRONMENT"] = environment.GetValueOrDefault("DOTNET_ENVIRONMENT") ?? "Production";
         info.Environment["Logging__Console__FormatterOptions__ColorBehavior"] = "Disabled";
         var process = Process.Start(info) ?? throw new InvalidOperationException("Could not start HTTP MCP server.");
         var ready = new TaskCompletionSource<Uri>(TaskCreationOptions.RunContinuationsAsynchronously);
