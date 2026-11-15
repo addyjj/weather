@@ -1,75 +1,38 @@
-# Architecture
+# Weather repository
 
-Use Clean Architecture with ports and adapters.
-Organize application workflows by feature.
+This monorepo contains a React dashboard, REST/SignalR API, MCP server, and weather
+history importer. The frontend and backend remain independently deployable.
 
-## Project structure
+## Layout and scoped guidance
 
-- <App>.Core: domain entities, aggregates, value objects, domain
-  events, and domain services.
-- <App>.UseCases: application workflows, commands, queries,
-  handlers, application DTOs, and application-owned ports.
-- <App>.Infrastructure: persistence and external service adapters.
-- <App>.<Host>: entry points such as MCP tools, HTTP endpoints,
-  or CLI commands, plus startup and dependency injection.
+- `src/`: .NET application projects. Follow `src/AGENTS.md` for backend architecture.
+- `tests/`: .NET tests. Follow `tests/AGENTS.md` for backend verification.
+- `ui/`: React/Vite application, component tests, Storybook, and Playwright tests.
+  Follow `ui/AGENTS.md` for frontend conventions.
+- `docs/`: database schema and deployment guidance.
+- `.github/workflows/`: shared CI and optional deployment automation.
 
-Create only the projects and folders the application needs.
+Keep language-specific architecture rules within their respective scopes. Read the
+relevant scoped guidance when editing shared configuration that affects that area.
 
-## Dependency rules
+## Shared contracts and configuration
 
-- Core must not depend on the other application projects.
-- UseCases depends on Core.
-- Infrastructure implements ports defined in Core or UseCases.
-- Hosts invoke use cases and wire infrastructure implementations.
-- Core and UseCases must not depend on transport frameworks,
-  database implementations, or external SDK models.
-
-## Use cases
-
-- Group each operation under its business feature.
-- Use a command or query and a handler for each operation.
-- Handlers coordinate domain behavior and external dependencies.
-- Keep business invariants in domain objects or domain services.
-- Inject handlers directly unless a mediator is justified.
-- Avoid generic base handlers and abstractions without a concrete need.
-
-Example:
-
-UseCases/<Feature>/<Operation>/
-  <Operation>Command.cs or <Operation>Query.cs
-  <Operation>Handler.cs
-
-## Ports and adapters
-
-- A port describes an interaction needed or offered by the application.
-- Express outbound ports as interfaces owned by Core or UseCases.
-- Inbound adapters translate incoming requests and invoke use cases.
-- Outbound adapters implement ports using storage or external systems.
-- Keep adapters thin; do not place business decisions in them.
-
-## Models
-
-- Use domain aggregates when executing domain behavior.
-- Use application-owned DTOs for read results and workflow outputs.
-- Map external SDK and database models inside Infrastructure.
-- Add host-specific response models only when the host needs
-  a different contract.
-- Do not create duplicate models or mapping layers without a reason.
-
-## Persistence and events
-
-- Use repositories for loading and persisting domain aggregates.
-- Read queries may return DTOs directly through query ports.
-- Preserve transactional consistency and handle concurrent updates.
-- Add domain events when they represent meaningful business facts.
-- Do not introduce event dispatch, messaging, or durable delivery
-  unless the application requires it.
+- Coordinate REST response, SignalR event, and weather-unit changes across the API,
+  UI types/services, documentation, and affected tests.
+- Keep loading, empty, error, and live-update behavior consistent across the stack.
+- Keep credentials in local ignored settings, User Secrets, or deployment settings.
+  Browser-exposed `VITE_` variables must contain only public configuration.
+- Keep local settings, dependency directories, build output, and test artifacts out
+  of commits. Example configuration must use placeholders or public defaults.
+- Keep README commands, relative paths, CI jobs, and deployment guidance aligned
+  with the monorepo layout. Run .NET commands from the root and npm commands from `ui/`.
 
 ## Verification
 
-- Test domain invariants and meaningful use-case behavior.
-- Add adapter integration tests where external behavior matters.
-- Verify at least one complete host-to-application workflow.
-- Run the relevant build and tests after changes.
-- Keep README commands and architecture guidance aligned with
-  the actual implementation.
+- Add or update tests for meaningful behavior changes and regressions.
+- Run the build and tests relevant to the changed application; use the scoped
+  instructions for commands and prerequisites.
+- For changes crossing the UI/API boundary, run `npm run test:e2e` from `ui/`.
+  These tests start the real API and a local Ambient HTTP/Socket.IO stub.
+- For documentation-only changes, check commands, paths, and the diff; application
+  builds and test suites need not be rerun.
