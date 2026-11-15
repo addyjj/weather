@@ -1,102 +1,71 @@
-import { useEffect, useState, useRef } from "react";
+import { useEffect, useState } from "react";
 import * as signalR from "@microsoft/signalr";
 import type { LatestData } from "../types/device";
+import { WEATHER_HUB_URL } from "../services/apiConfig";
 
-interface UseSignalRResult {
-  weatherData: LatestData | null;
-  isConnected: boolean;
-  error: Error | null;
-}
-
-export function useSignalR(hubUrl?: string): UseSignalRResult {
-  let url = hubUrl;
-
-  if (!url) {
-    const baseUrl = import.meta.env.VITE_API_BASE_URL;
-    if (!baseUrl) {
-      throw new Error(
-        "SignalR hub URL not provided. Pass it as a parameter or set VITE_API_BASE_URL environment variable.",
-      );
-    }
-    url = `${baseUrl}/weatherHub`;
-  }
+export function useSignalR(hubUrl = WEATHER_HUB_URL) {
   const [weatherData, setWeatherData] = useState<LatestData | null>(null);
   const [isConnected, setIsConnected] = useState(false);
   const [error, setError] = useState<Error | null>(null);
-  const connectionRef = useRef<signalR.HubConnection | null>(null);
-  const isMountedRef = useRef(true);
 
   useEffect(() => {
-    isMountedRef.current = true;
-
+    let disposed = false;
+    let retry: ReturnType<typeof setTimeout> | undefined;
     const connection = new signalR.HubConnectionBuilder()
-      .withUrl(url, {
-        withCredentials: false,
-        transport: signalR.HttpTransportType.WebSockets,
-        skipNegotiation: true,
-      })
+      .withUrl(hubUrl, { withCredentials: false })
       .withAutomaticReconnect([0, 1000, 3000, 5000, 10000])
-      .configureLogging(signalR.LogLevel.Information)
+      .configureLogging(signalR.LogLevel.None)
       .build();
 
-    connectionRef.current = connection;
-
     connection.on("weatherData", (data: LatestData) => {
-      console.log("Weather data received:", data);
-      if (isMountedRef.current) {
-        setWeatherData(data);
-      }
+      if (!disposed)
+        setWeatherData((previous) =>
+          !previous || Date.parse(data.date) >= Date.parse(previous.date)
+            ? data
+            : previous,
+        );
     });
-
+    connection.onreconnecting(() => {
+      if (!disposed) setIsConnected(false);
+    });
     connection.onreconnected(() => {
-      console.log("SignalR reconnected");
-      if (isMountedRef.current) {
+      if (!disposed) {
         setIsConnected(true);
         setError(null);
       }
     });
 
+    async function start() {
+      try {
+        await connection.start();
+        if (disposed) {
+          await connection.stop();
+          return;
+        }
+        setIsConnected(true);
+        setError(null);
+      } catch (err) {
+        if (!disposed) {
+          setIsConnected(false);
+          setError(err instanceof Error ? err : new Error(String(err)));
+          retry = setTimeout(start, 5000);
+        }
+      }
+    }
     connection.onclose(() => {
-      console.log("SignalR connection closed");
-      if (isMountedRef.current) {
+      if (!disposed) {
         setIsConnected(false);
+        retry = setTimeout(start, 5000);
       }
     });
-
-    const startConnection = async () => {
-      try {
-        console.log("Starting SignalR connection to:", url);
-        console.log("Connection state:", connection.state);
-        await connection.start();
-        console.log("SignalR connected successfully");
-        if (isMountedRef.current) {
-          setIsConnected(true);
-          setError(null);
-        }
-      } catch (err) {
-        const error = err instanceof Error ? err : new Error(String(err));
-        console.error("Failed to start SignalR connection:", error.message);
-        console.error("Full error:", error);
-        if (isMountedRef.current) {
-          setError(error);
-          setIsConnected(false);
-        }
-      }
-    };
-
-    startConnection();
-
+    void start();
     return () => {
-      isMountedRef.current = false;
-      const conn = connectionRef.current;
-      if (conn && conn.state === signalR.HubConnectionState.Connected) {
-        console.log("Stopping SignalR connection");
-        conn
-          .stop()
-          .catch((err) => console.error("Error stopping connection:", err));
-      }
+      disposed = true;
+      clearTimeout(retry);
+      // Stop connecting as well as connected sockets (including StrictMode cleanup).
+      void connection.stop();
     };
-  }, [url]);
+  }, [hubUrl]);
 
   return { weatherData, isConnected, error };
 }

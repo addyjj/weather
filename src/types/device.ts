@@ -17,6 +17,6 @@ export interface LatestData {
 export interface Device {
   name: string;
   location: string;
-  macAddress: string;
+  macAddress?: string;
   latestData: LatestData;
 }

@@ -9,19 +9,28 @@ const queryClient = new QueryClient();
 
 function AppContent() {
   const { data: devices, isLoading, error } = useDevices();
-  const { weatherData } = useSignalR();
+  const { weatherData, isConnected } = useSignalR();
   const device = devices?.[0];
   // Use real-time weatherData from SignalR if available, otherwise fall back to initial device data
-  const deviceData = weatherData || device?.latestData;
-  const lastUpdated = new Date(deviceData?.date || new Date());
+  const initialData = device?.latestData;
+  const deviceData =
+    weatherData &&
+    (!initialData ||
+      Date.parse(weatherData.date) >= Date.parse(initialData.date))
+      ? weatherData
+      : initialData;
+  const lastUpdated = deviceData ? new Date(deviceData.date) : null;
 
   return (
     <div>
       <AppHeader
-        stationName={device?.name}
-        location={device?.location}
+        stationName={device?.name || "Weather station"}
+        location={device?.location || ""}
         lastUpdated={lastUpdated}
       />
+      <p role="status" className="px-4 py-1 text-xs text-slate-500">
+        {isConnected ? "Live updates connected" : "Live updates reconnecting"}
+      </p>
       <div className="flex h-screen overflow-hidden">
         <Routes>
           <Route

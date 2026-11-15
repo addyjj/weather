@@ -3,7 +3,7 @@ import { LastUpdated } from "../LastUpdated";
 type AppHeaderProps = {
   stationName?: string;
   location?: string;
-  lastUpdated?: Date;
+  lastUpdated?: Date | null;
 };
 
 export function AppHeader({
@@ -24,7 +24,11 @@ export function AppHeader({
           </p>
         </div>
       </div>
-      <LastUpdated date={lastUpdated} />
+      {lastUpdated ? (
+        <LastUpdated date={lastUpdated} />
+      ) : (
+        <span>Awaiting weather data</span>
+      )}
     </header>
   );
 }

@@ -8,6 +8,18 @@ type HomeProps = {
 };
 
 export function Home({ data, isLoading, error }: HomeProps) {
+  if (!data)
+    return (
+      <main className="flex-1 p-4">
+        {isLoading ? (
+          <p role="status">Loading weather data...</p>
+        ) : error ? (
+          <p role="alert">Error loading data: {error.message}</p>
+        ) : (
+          <p role="status">No weather stations found.</p>
+        )}
+      </main>
+    );
   return (
     <main className="flex-1 overflow-y-auto p-4">
       {isLoading && <div className="text-center">Loading weather data...</div>}

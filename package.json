@@ -9,6 +9,7 @@
     "lint": "eslint .",
     "preview": "vite preview",
     "test": "vitest --run",
+    "test:e2e": "playwright test",
     "storybook": "storybook dev -p 6006",
     "build-storybook": "storybook build"
   },
@@ -51,6 +52,7 @@
     "jsdom": "^29.1.1",
     "playwright": "^1.60.0",
     "prettier": "3.8.3",
+    "socket.io": "^4.8.4",
     "storybook": "^10.4.2",
     "typescript": "~6.0.3",
     "typescript-eslint": "^8.60.1",
