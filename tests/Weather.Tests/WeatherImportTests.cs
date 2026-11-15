@@ -35,12 +35,51 @@ public sealed class WeatherImportHandlerTests
         Assert.Equal(0, store.Writes);
     }
 
-    [Fact]
-    public async Task RejectsNonAdvancingUpstreamPagesWithoutWriting()
+    [Theory]
+    [InlineData(1001)]
+    [InlineData(0)]
+    [InlineData(-1)]
+    public async Task RejectsInvalidUpstreamTimestampsWithoutWriting(long timestamp)
     {
         var store = new FakeStore(null);
-        var handler = new ImportWeatherHistoryHandler(new FakeSource([Reading(1001)]), store, new FixedClock());
+        var handler = new ImportWeatherHistoryHandler(new FakeSource([Reading(timestamp)]), store, new FixedClock());
         await Assert.ThrowsAsync<InvalidOperationException>(() => handler.HandleAsync(new("station")));
+        Assert.Equal(0, store.Writes);
+    }
+
+    [Theory]
+    [InlineData(null)]
+    [InlineData("")]
+    [InlineData(" ")]
+    public async Task RequiresAStationBeforeReadingOrWriting(string? station)
+    {
+        var source = new FakeSource();
+        var store = new FakeStore(null);
+        var handler = new ImportWeatherHistoryHandler(source, store, new FixedClock());
+        await Assert.ThrowsAnyAsync<ArgumentException>(() => handler.HandleAsync(new(station!)));
+        Assert.Empty(source.Cursors);
+        Assert.Equal(0, store.Writes);
+    }
+
+    [Fact]
+    public async Task UpToDateStoreDoesNotRequestHistoryOrWrite()
+    {
+        var source = new FakeSource();
+        var store = new FakeStore(1000);
+        var result = await new ImportWeatherHistoryHandler(source, store, new FixedClock()).HandleAsync(new("station"));
+        Assert.Equal(new ImportWeatherHistoryResult(0, 0), result);
+        Assert.Empty(source.Cursors);
+        Assert.Equal(0, store.Writes);
+    }
+
+    [Fact]
+    public async Task LaterPageFailureDoesNotSaveBufferedHistory()
+    {
+        var source = new FakeSource([Reading(900)], [Reading(800), Reading(0)]);
+        var store = new FakeStore(null);
+        var handler = new ImportWeatherHistoryHandler(source, store, new FixedClock());
+        await Assert.ThrowsAsync<InvalidOperationException>(() => handler.HandleAsync(new("station")));
+        Assert.Equal(new long[] { 1000, 899 }, source.Cursors);
         Assert.Equal(0, store.Writes);
     }
 

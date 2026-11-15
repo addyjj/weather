@@ -442,6 +442,15 @@ dotnet build Weather.slnx
 dotnet test Weather.slnx --no-build
 ```
 
+To collect line and branch coverage, including the production host processes:
+
+```powershell
+dotnet test Weather.slnx --no-build --collect 'Code Coverage;Format=Cobertura' --results-directory TestResults
+```
+
+The Cobertura XML report is written under the ignored `TestResults` directory.
+Inspect production assemblies separately from `Weather.Tests` when assessing coverage.
+
 The suite creates a uniquely named `WeatherMcpTests_<guid>` LocalDB database,
 creates the expected table, seeds known readings, and drops only that test database
 afterward. It never writes to the existing `weather` database. An unavailable
