@@ -13,7 +13,8 @@ COPY .config/dotnet-tools.json ./.config/dotnet-tools.json
 RUN dotnet tool restore
 COPY Directory.Build.props ./
 COPY src/ ./src/
-RUN dotnet ef migrations bundle --project src/Weather.Infrastructure --configuration Release \
+RUN dotnet restore src/Weather.Infrastructure/Weather.Infrastructure.csproj \
+    && dotnet ef migrations bundle --project src/Weather.Infrastructure --configuration Release \
     --self-contained --target-runtime linux-x64 --output /out/efbundle
 
 FROM mcr.microsoft.com/dotnet/aspnet:10.0 AS runtime

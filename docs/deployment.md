@@ -135,33 +135,40 @@ paths and .NET version and adds verification gates:
 3. After both pass, Linux publishes API, MCP, importer, and reviewed migration
    artifacts. It also checks the EF snapshot for unscaffolded changes and rejects
    local settings in published output.
-4. Optional Azure deployment jobs run after publishing. The workflow does not
+4. Azure deployment runs after publishing, configures the existing REST host, and
+   verifies liveness, dependency health, and SignalR CORS. The workflow does not
    apply database migrations or run an import.
 
-CI runs on PRs and pushes to `main`/`master`. Azure deployment runs on pushes to
-`main` or manual `workflow_dispatch`, and only for apps whose repository
-variables have been configured. A push to `master` verifies/publishes without
-deploying. Configure the `production` GitHub environment with the protection rules
-appropriate to the deployment and these OIDC secrets:
+CI runs on PRs and pushes to `main`/`master`. Azure REST deployment runs on pushes
+to `main` or manual `workflow_dispatch` from `main`. It defaults to the existing
+`weather-api` App Service and Production slot. A push to `master` verifies/publishes
+without deploying. New repositories can configure these OIDC secrets:
 
 - `AZURE_CLIENT_ID`
 - `AZURE_TENANT_ID`
 - `AZURE_SUBSCRIPTION_ID`
 
-Create an Azure federated identity credential for the repository's `production`
-environment and give it deployment permission for the selected apps. Configure:
+This repository already has Azure Deployment Center-generated client/tenant/
+subscription secrets, which the workflow uses as fallbacks for those generic names.
+Authentication keeps the original main-branch OIDC subject, without introducing a
+different environment subject. For another repository, create the corresponding
+main-branch Azure federated identity credential and grant deployment permission
+for the selected apps. Optional repository variables:
 
 | GitHub variable | Purpose |
 | --- | --- |
-| `AZURE_WEBAPP_NAME` | Existing REST App Service name, e.g. `weather-api`; blank skips REST deployment |
+| `AZURE_WEBAPP_NAME` | REST App Service name; defaults to `weather-api` |
 | `AZURE_WEBAPP_SLOT` | REST slot; defaults to `Production` |
 | `AZURE_MCP_WEBAPP_NAME` | Optional MCP App Service name; blank skips MCP deployment |
 | `AZURE_MCP_WEBAPP_SLOT` | MCP slot; defaults to `Production` |
 
-The old repository's generated Azure secret names are not assumed to exist in this
-repository. No Azure resources, credentials, or live deployments are created by
-adding the workflow. The importer remains a downloaded one-shot artifact or
-container; it is not started as an App Service.
+`WEATHER_UI_ORIGIN` overrides the existing production UI origin,
+`https://weather-ui-rho.vercel.app`, used for REST/SignalR CORS. The workflow enables
+HTTPS-only access and WebSockets, configures the .NET 10 Linux runtime/startup
+command, and sets the app's bound hostnames in `AllowedHosts`. It updates only the
+specified app settings; existing Ambient and SQL credentials remain in App Service.
+It creates no Azure resources or new credentials. The importer remains a downloaded
+one-shot artifact or container; it is not started as an App Service.
 
 Use Linux App Services with the .NET 10 runtime. Configure their startup command as
 `dotnet Weather.WebApi.dll` or `dotnet Weather.Mcp.dll`, and set
