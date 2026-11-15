@@ -1,4 +1,4 @@
-# Weather MCP server
+# Weather MCP server and REST API
 
 A .NET 10 Streamable HTTP MCP server with two tools:
 
@@ -9,6 +9,72 @@ A .NET 10 Streamable HTTP MCP server with two tools:
 
 Historical queries use SQL only. The server does not import data or change your
 database schema.
+
+The solution also includes a separate REST API host with the device endpoints
+from `Weather.Api`. Both hosts share the application and infrastructure projects.
+
+## REST API
+
+Start the device API from the repository root (after building):
+
+```powershell
+dotnet run --project src/Weather.WebApi --no-build --no-launch-profile
+```
+
+The default address is **http://localhost:5001**, so it can run alongside the MCP
+host on port 5000. Override it with `-- --urls http://localhost:5051` or
+`ASPNETCORE_URLS`. For a Release build, add `-c Release` to the run command.
+
+| Route | Behavior |
+| --- | --- |
+| `GET /Devices` | Registered Ambient devices with `name`, `location`, and `latestData` |
+| `GET /Devices/{macAddress}/data` | Ambient device readings, newest first |
+
+The data route accepts optional `endDate` (an ISO 8601 timestamp, inclusive) and
+`limit` (default 10, range 1–100). Supply UTC (`Z`) or an explicit offset for
+unambiguous dates. The adapter converts `endDate` to epoch milliseconds for
+Ambient Weather. Invalid dates or limits return HTTP 400.
+
+```powershell
+Invoke-RestMethod 'http://localhost:5001/Devices'
+Invoke-RestMethod 'http://localhost:5001/Devices/AA:BB:CC:DD:EE:FF/data?endDate=2026-11-14T12:00:00Z&limit=10'
+```
+
+Both routes preserve Weather.Api's camel-case JSON contracts. Readings contain
+`date`, `baromRel`, `tempOut`, `humidityOut`, `windDir`, `windSpeed`, `windGust`,
+`eventRain`, `dailyRain`, `uvIndex`, `feelsLike`, `dewPoint`, and `solarRadiation`.
+Missing device names/locations become empty strings, and missing reading fields
+use the original contract's zero/default values. Temperatures are °F, pressure
+is inHg, wind is mph, rainfall is inches, and solar radiation is W/m².
+
+Configure `Ambient__ApiKey` and `Ambient__ApplicationKey` using the environment
+variables below, or an ignored `src/Weather.WebApi/appsettings.Local.json` file.
+`Ambient__ApiUrl` is optional; `DeviceMacAddress` is not required by these routes.
+Local settings are copied beside the development executable and excluded from
+publish output. Environment variables override local settings.
+
+Results are cached for five minutes, separately for each device/date/limit
+combination, matching Weather.Api's cache duration. These endpoints read Ambient
+Weather directly and do not need SQL configuration. Upstream failures return
+HTTP 502 Problem Details without upstream response bodies or credentials.
+The REST host defaults to loopback with local hostnames and does not enable CORS
+or authentication. Configure HTTPS and access controls before remote hosting.
+The host also exposes SignalR at `/weatherHub`, broadcasting `weatherData` events
+with the same reading contract as the REST endpoints. An Infrastructure adapter
+subscribes to Ambient's real-time Socket.IO feed, while a host background service
+relays readings through an application query handler. `Ambient__SocketUrl` defaults
+to `https://rt2.ambientweather.net`. Disconnected feeds retry after ten seconds and
+resubscribe. HTTP device queries continue working while the feed is unavailable.
+Chat streaming, background database imports, and the original API's operational
+endpoints are outside this host's scope.
+
+The sibling `weather-ui` project proxies `/api/devices` and `/api/weatherHub` to
+this host, including WebSocket upgrades. Start the API with `--no-launch-profile`
+as above to use port 5001, then run `npm run dev` from `weather-ui`. Set
+`WEATHER_API_URL` on the UI development process if you use another backend port.
+Its `npm run test:e2e` command uses Playwright, the real API host, and a local
+Ambient HTTP/Socket.IO stub to verify initial readings, live updates, reconnects,
+and loading/empty/error states without live credentials.
 
 ## Current conditions
 
@@ -60,7 +126,7 @@ The tool accepts a typed `options` object with optional properties `filter`, `se
 `orderBy`, `apply`, `compute`, `top`, `skip`, `count`, and `timeZone`. Expression properties are
 strings using OData syntax; `top` and `skip` are integers and `count` is a boolean.
 Use exact, case-sensitive weather field names. The MCP adapter maps these properties
-to standard OData options internally for reuse by a future HTTP API. This replaces
+to standard OData options internally. This replaces
 the previous dictionary contract; `$`-prefixed JSON property names are not accepted.
 Arbitrary SQL,
 navigation expansion, search, and additional entity sets are not exposed.
@@ -261,6 +327,9 @@ connects with the official Streamable HTTP MCP client, discovers both tools, and
 queries the seeded SQL database through the complete production pipeline.
 Current-conditions tests retain the local Ambient HTTP stub; no live Ambient
 credentials or network requests are needed.
+REST tests launch the production WebApi host against a local Ambient HTTP stub
+and verify both device routes, exact response fields, query defaults and date
+conversion, caching, validation, and upstream error responses.
 
 If a running MCP instance locks Debug build files, stop it before rebuilding,
 or run `dotnet build Weather.slnx -c Release` followed by
@@ -341,10 +410,15 @@ example `Serilog__MinimumLevel__Override__Weather=Debug` for more app detail).
 - `Weather.Mcp`: ASP.NET Core HTTP host, thin tool adapters, startup, and dependency
   injection. Maps MCP at `/mcp`; OData's internal query request context stays inside
   Infrastructure. No OData REST routes are exposed.
+- `Weather.WebApi`: separate ASP.NET Core REST host with thin device controllers.
+  Invokes the device query handlers in UseCases; Infrastructure maps Ambient
+  device payloads to application DTOs and caches results for five minutes.
+  A hosted service relays the application weather stream to SignalR clients at
+  `/weatherHub`; Socket.IO dependencies and deserialization stay in Infrastructure.
 
-A future API can reuse the OData EDM, validation, composition, and SQL execution.
-Its routing and HTTP/OData response formatting would be host-specific. No automatic
-schema creation, migrations, or changes to Weather.Api are performed by this server.
+The REST device routes use Ambient Weather. The shared OData pipeline remains
+available for future SQL history routes. No automatic schema creation,
+migrations, or changes to Weather.Api are performed by either host.
 
 No Core project is needed until domain behavior exists. No persistence or
 mediator is needed. HTTP calls and cancellation flow asynchronously through the

@@ -1,0 +1,7 @@
+<Project Sdk="Microsoft.NET.Sdk.Web">
+  <ItemGroup>
+    <ProjectReference Include="../Weather.UseCases/Weather.UseCases.csproj" />
+    <ProjectReference Include="../Weather.Infrastructure/Weather.Infrastructure.csproj" />
+    <Content Update="appsettings.Local.json" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="Never" />
+  </ItemGroup>
+</Project>

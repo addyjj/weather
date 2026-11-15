@@ -6,4 +6,5 @@ public sealed class AmbientWeatherOptions
     public string ApiKey { get; set; } = "";
     public string ApplicationKey { get; set; } = "";
     public string DeviceMacAddress { get; set; } = "";
+    public string SocketUrl { get; set; } = "https://rt2.ambientweather.net";
 }

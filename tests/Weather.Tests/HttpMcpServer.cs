@@ -21,11 +21,18 @@ internal sealed class HttpMcpServer : IAsyncDisposable
         LogLines = logLines;
     }
 
-    public static async Task<HttpMcpServer> StartAsync(IReadOnlyDictionary<string, string?> environment, CancellationToken ct)
+    public static Task<HttpMcpServer> StartAsync(IReadOnlyDictionary<string, string?> environment, CancellationToken ct) =>
+        StartHostAsync(environment, "Weather.Mcp", "MCP ready at ", ct);
+
+    public static Task<HttpMcpServer> StartRestAsync(IReadOnlyDictionary<string, string?> environment, CancellationToken ct) =>
+        StartHostAsync(environment, "Weather.WebApi", "REST API ready at ", ct);
+
+    private static async Task<HttpMcpServer> StartHostAsync(
+        IReadOnlyDictionary<string, string?> environment, string host, string marker, CancellationToken ct)
     {
         var root = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "../../../../../"));
         var configuration = new DirectoryInfo(AppContext.BaseDirectory).Parent!.Name;
-        var serverPath = Path.Combine(root, "src", "Weather.Mcp", "bin", configuration, "net10.0", "Weather.Mcp.dll");
+        var serverPath = Path.Combine(root, "src", host, "bin", configuration, "net10.0", host + ".dll");
         var info = new ProcessStartInfo("dotnet")
         {
             UseShellExecute = false, CreateNoWindow = true,
@@ -46,7 +53,6 @@ internal sealed class HttpMcpServer : IAsyncDisposable
             while (await process.StandardOutput.ReadLineAsync() is { } line)
             {
                 logLines.Enqueue(line);
-                const string marker = "MCP ready at ";
                 var index = line.IndexOf(marker, StringComparison.Ordinal);
                 if (index >= 0 && Uri.TryCreate(line[(index + marker.Length)..].Trim(), UriKind.Absolute, out var address))
                     ready.TrySetResult(address);
