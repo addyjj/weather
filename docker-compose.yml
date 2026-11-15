@@ -1,0 +1,55 @@
+name: weather
+
+x-weather-environment: &weather-environment
+  ConnectionStrings__sql: ${WEATHER_SQL_CONNECTION:-}
+  Ambient__ApiKey: ${AMBIENT_API_KEY:-}
+  Ambient__ApplicationKey: ${AMBIENT_APPLICATION_KEY:-}
+  Ambient__DeviceMacAddress: ${AMBIENT_DEVICE_MAC_ADDRESS:-}
+  Ambient__ApiUrl: ${AMBIENT_API_URL:-https://api.ambientweather.net/v1/}
+  Ambient__SocketUrl: ${AMBIENT_SOCKET_URL:-https://rt2.ambientweather.net}
+
+services:
+  weather.webapi:
+    image: ${DOCKER_REGISTRY:-}weather-webapi:${WEATHER_IMAGE_TAG:-local}
+    build:
+      context: .
+      target: webapi
+    environment:
+      <<: *weather-environment
+      ASPNETCORE_ENVIRONMENT: Production
+      ASPNETCORE_URLS: http://+:8080
+      AllowedHosts: ${WEATHER_ALLOWED_HOSTS:-localhost;127.0.0.1;[::1];weather.webapi}
+    ports:
+      - "127.0.0.1:${WEATHER_API_PORT:-5001}:8080"
+    restart: unless-stopped
+
+  weather.mcp:
+    image: ${DOCKER_REGISTRY:-}weather-mcp:${WEATHER_IMAGE_TAG:-local}
+    build:
+      context: .
+      target: mcp
+    environment:
+      <<: *weather-environment
+      ASPNETCORE_ENVIRONMENT: Production
+      ASPNETCORE_URLS: http://+:8080
+      AllowedHosts: ${WEATHER_MCP_ALLOWED_HOSTS:-localhost;127.0.0.1;[::1];weather.mcp}
+    ports:
+      - "127.0.0.1:${WEATHER_MCP_PORT:-5000}:8080"
+    restart: unless-stopped
+
+  weather.import:
+    profiles: [tools]
+    image: ${DOCKER_REGISTRY:-}weather-import:${WEATHER_IMAGE_TAG:-local}
+    build:
+      context: .
+      target: import
+    environment: *weather-environment
+
+  weather.migrate:
+    profiles: [tools]
+    image: ${DOCKER_REGISTRY:-}weather-migrate:${WEATHER_IMAGE_TAG:-local}
+    build:
+      context: .
+      target: migrate
+    environment:
+      ConnectionStrings__sql: ${WEATHER_SQL_CONNECTION:-}

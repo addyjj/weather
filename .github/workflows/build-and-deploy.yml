@@ -1,0 +1,144 @@
+name: Build, test, and deploy weather services
+
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  tests:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-dotnet@v6
+        with:
+          dotnet-version: 10.0.x
+      - name: Start SQL Server LocalDB
+        shell: pwsh
+        run: |
+          sqllocaldb start MSSQLLocalDB
+          if ($LASTEXITCODE -ne 0) { throw 'LocalDB could not be started.' }
+      - run: dotnet build Weather.slnx -c Release
+      - run: dotnet test Weather.slnx -c Release --no-build --logger trx --results-directory TestResults
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: test-results
+          path: TestResults
+
+  containers:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - name: Validate Compose and build all container targets
+        run: |
+          docker compose --env-file .env.example --profile tools config --quiet
+          docker compose --env-file .env.example --profile tools build
+      - name: Smoke-test container entry points
+        run: |
+          docker run --rm weather-import:local --help
+          docker run --rm weather-migrate:local --help
+          docker compose --env-file .env.example up -d
+          for attempt in $(seq 1 30); do
+            if curl --fail --silent http://localhost:5001/health; then break; fi
+            sleep 2
+          done
+          test "$(curl --fail --silent http://localhost:5001/health)" = Healthy
+          curl --fail --silent http://localhost:5000/mcp \
+            -H 'Content-Type: application/json' -H 'Accept: application/json, text/event-stream' \
+            -d '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-06-18","capabilities":{},"clientInfo":{"name":"ci","version":"1"}}}' | tee /tmp/mcp-response
+          grep -q 'serverInfo' /tmp/mcp-response
+      - name: Stop containers
+        if: always()
+        run: docker compose --env-file .env.example --profile tools down
+
+  publish:
+    needs: [tests, containers]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-dotnet@v6
+        with:
+          dotnet-version: 10.0.x
+      - run: dotnet tool restore
+      - name: Publish services and migration artifacts
+        run: |
+          dotnet publish src/Weather.WebApi -c Release -o artifacts/webapi
+          dotnet publish src/Weather.Mcp -c Release -o artifacts/mcp
+          dotnet publish src/Weather.Import -c Release -o artifacts/import
+          dotnet ef migrations has-pending-model-changes --project src/Weather.Infrastructure --configuration Release
+          mkdir -p artifacts/database
+          dotnet ef migrations script --idempotent --project src/Weather.Infrastructure --configuration Release -o artifacts/database/migrate.sql
+          dotnet ef migrations bundle --project src/Weather.Infrastructure --configuration Release --self-contained --target-runtime linux-x64 -o artifacts/database/efbundle
+          cp docs/deployment.md artifacts/database/README.md
+          if find artifacts -iname 'appsettings.Local.json' | grep -q .; then
+            echo 'Local settings must not be published.'; exit 1
+          fi
+      - uses: actions/upload-artifact@v7
+        with:
+          name: webapi
+          path: artifacts/webapi
+      - uses: actions/upload-artifact@v7
+        with:
+          name: mcp
+          path: artifacts/mcp
+      - uses: actions/upload-artifact@v7
+        with:
+          name: import
+          path: artifacts/import
+      - uses: actions/upload-artifact@v7
+        with:
+          name: database
+          path: artifacts/database
+
+  deploy-webapi:
+    needs: publish
+    if: github.event_name != 'pull_request' && (github.ref == 'refs/heads/main' || github.event_name == 'workflow_dispatch') && vars.AZURE_WEBAPP_NAME != ''
+    runs-on: ubuntu-latest
+    environment: production
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/download-artifact@v8
+        with:
+          name: webapi
+          path: package
+      - uses: azure/login@v2
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+      - uses: azure/webapps-deploy@v3
+        with:
+          app-name: ${{ vars.AZURE_WEBAPP_NAME }}
+          slot-name: ${{ vars.AZURE_WEBAPP_SLOT || 'Production' }}
+          package: package
+
+  deploy-mcp:
+    needs: publish
+    if: github.event_name != 'pull_request' && (github.ref == 'refs/heads/main' || github.event_name == 'workflow_dispatch') && vars.AZURE_MCP_WEBAPP_NAME != ''
+    runs-on: ubuntu-latest
+    environment: production
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/download-artifact@v8
+        with:
+          name: mcp
+          path: package
+      - uses: azure/login@v2
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+      - uses: azure/webapps-deploy@v3
+        with:
+          app-name: ${{ vars.AZURE_MCP_WEBAPP_NAME }}
+          slot-name: ${{ vars.AZURE_MCP_WEBAPP_SLOT || 'Production' }}
+          package: package

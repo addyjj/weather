@@ -6,6 +6,7 @@
   <ItemGroup>
     <ProjectReference Include="../../src/Weather.Mcp/Weather.Mcp.csproj" />
     <ProjectReference Include="../../src/Weather.WebApi/Weather.WebApi.csproj" />
+    <ProjectReference Include="../../src/Weather.Import/Weather.Import.csproj" />
   </ItemGroup>
   <ItemGroup>
     <PackageReference Include="Microsoft.NET.Test.Sdk" Version="18.12.0" />

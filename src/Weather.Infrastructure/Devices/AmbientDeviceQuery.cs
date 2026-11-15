@@ -45,6 +45,9 @@ public sealed class AmbientDeviceQuery(HttpClient client, AmbientWeatherOptions 
         return value;
     }
 
+    internal async Task ProbeAsync(string macAddress, CancellationToken cancellationToken) =>
+        _ = await GetAsync<AmbientReading[]>($"devices/{Uri.EscapeDataString(macAddress)}?limit=1", cancellationToken);
+
     private async Task<T> GetAsync<T>(string path, CancellationToken cancellationToken)
     {
         if (string.IsNullOrWhiteSpace(options.ApiKey) || string.IsNullOrWhiteSpace(options.ApplicationKey))

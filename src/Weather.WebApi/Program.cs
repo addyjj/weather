@@ -6,6 +6,8 @@ using Weather.UseCases.Devices.GetDeviceData;
 using Weather.UseCases.Devices.StreamWeatherUpdates;
 using Weather.WebApi.HostedServices;
 using Weather.WebApi.Hubs;
+using Weather.Infrastructure.HealthChecks;
+using Weather.WebApi.HealthChecks;
 
 var builder = WebApplication.CreateBuilder(args);
 builder.Configuration
@@ -22,9 +24,14 @@ builder.Services.AddHostedService<WeatherBroadcastService>();
 builder.Services.AddMemoryCache();
 builder.Services.AddSingleton(builder.Configuration.GetSection("Ambient").Get<AmbientWeatherOptions>() ?? new());
 builder.Services.AddSingleton(new HttpClient { Timeout = TimeSpan.FromSeconds(20) });
-builder.Services.AddTransient<IDeviceQuery, AmbientDeviceQuery>();
+builder.Services.AddTransient<AmbientDeviceQuery>();
+builder.Services.AddTransient<IDeviceQuery>(services => services.GetRequiredService<AmbientDeviceQuery>());
 builder.Services.AddTransient<GetDevicesHandler>();
 builder.Services.AddTransient<GetDeviceDataHandler>();
+builder.Services.AddHealthChecks()
+    .AddCheck("database", new DatabaseHealthCheck(builder.Configuration.GetConnectionString("sql")),
+        tags: ["detail"], timeout: TimeSpan.FromSeconds(10))
+    .AddCheck<AmbientWeatherApiHealthCheck>("ambient_weather_api", tags: ["detail"], timeout: TimeSpan.FromSeconds(10));
 
 await using var app = builder.Build();
 app.Use(async (context, next) =>
@@ -38,6 +45,7 @@ app.Use(async (context, next) =>
 });
 app.MapControllers();
 app.MapHub<WeatherHub>("/weatherHub");
+app.MapWeatherHealthChecks();
 app.Lifetime.ApplicationStarted.Register(() =>
 {
     foreach (var address in app.Urls)

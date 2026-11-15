@@ -1,6 +1,7 @@
 <Solution>
   <Folder Name="/src/">
     <Project Path="src/Weather.Infrastructure/Weather.Infrastructure.csproj" />
+    <Project Path="src/Weather.Import/Weather.Import.csproj" />
     <Project Path="src/Weather.Mcp/Weather.Mcp.csproj" />
     <Project Path="src/Weather.WebApi/Weather.WebApi.csproj" />
     <Project Path="src/Weather.UseCases/Weather.UseCases.csproj" />

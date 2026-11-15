@@ -1,0 +1,9 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup><OutputType>Exe</OutputType></PropertyGroup>
+  <ItemGroup>
+    <FrameworkReference Include="Microsoft.AspNetCore.App" />
+    <ProjectReference Include="../Weather.UseCases/Weather.UseCases.csproj" />
+    <ProjectReference Include="../Weather.Infrastructure/Weather.Infrastructure.csproj" />
+    <Content Include="appsettings.Local.json" Condition="Exists('appsettings.Local.json')" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="Never" />
+  </ItemGroup>
+</Project>

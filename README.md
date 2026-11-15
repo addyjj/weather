@@ -7,8 +7,9 @@ A .NET 10 Streamable HTTP MCP server with two tools:
 - `query_weather_history`: read-only querying of stored SQL Server readings using
   OData filters, projections, aggregates, sorting, and pagination.
 
-Historical queries use SQL only. The server does not import data or change your
-database schema.
+Historical queries use SQL only. The MCP and REST hosts do not import data or
+change your database schema. A separate console importer can add Ambient history
+to the existing table when explicitly run.
 
 The solution also includes a separate REST API host with the device endpoints
 from `Weather.Api`. Both hosts share the application and infrastructure projects.
@@ -65,8 +66,7 @@ subscribes to Ambient's real-time Socket.IO feed, while a host background servic
 relays readings through an application query handler. `Ambient__SocketUrl` defaults
 to `https://rt2.ambientweather.net`. Disconnected feeds retry after ten seconds and
 resubscribe. HTTP device queries continue working while the feed is unavailable.
-Chat streaming, background database imports, and the original API's operational
-endpoints are outside this host's scope.
+Chat streaming and background database imports are outside this host's scope.
 
 The sibling `weather-ui` project proxies `/api/devices` and `/api/weatherHub` to
 this host, including WebSocket upgrades. Start the API with `--no-launch-profile`
@@ -75,6 +75,81 @@ as above to use port 5001, then run `npm run dev` from `weather-ui`. Set
 Its `npm run test:e2e` command uses Playwright, the real API host, and a local
 Ambient HTTP/Socket.IO stub to verify initial readings, live updates, reconnects,
 and loading/empty/error states without live credentials.
+
+## Health endpoints
+
+The REST host includes the old API's two health routes:
+
+| Route | Behavior |
+| --- | --- |
+| `GET /health` | Lightweight liveness check; returns plain-text `Healthy` and HTTP 200 while the host is running |
+| `GET /health/details` | Checks SQL connectivity and Ambient Weather; returns JSON and HTTP 200 when both are healthy, or HTTP 503 when either is unhealthy |
+
+Detailed results retain the original `status` and `checks` envelope. Each check
+has `name`, `status`, `description`, and `exception` fields. Check names are
+`database` and `ambient_weather_api`; `exception` is always null so provider
+exceptions, connection details, and credentials are not exposed.
+
+The database check opens the configured `ConnectionStrings:sql` database without
+reading or changing tables. The Ambient check makes a fresh authenticated
+`/devices/{DeviceMacAddress}?limit=1` request and bypasses the device response cache.
+It requires `Ambient:DeviceMacAddress` in addition to the API/application keys.
+Each dependency check has a ten-second timeout. Missing configuration or unavailable
+dependencies produce unhealthy detail results; liveness does not contact them.
+Health responses are not cached. Poll detailed health sparingly because each call
+uses Ambient API quota. These checks test dependency connectivity, not the live
+Socket.IO subscription or the presence of the SQL history table.
+
+```powershell
+Invoke-RestMethod 'http://localhost:5001/health'
+Invoke-RestMethod 'http://localhost:5001/health/details'
+```
+
+## Import Ambient history
+
+`Weather.Import` replaces the old Weather.Api console import command. It reads
+Ambient history backward from now until reaching the newest saved `DateUtc`,
+then adds only newer readings to the existing `dbo.DeviceData` table. It preserves
+all stored weather fields, including indoor sensors and numeric/boolean battery
+flags. Like the original importer, it waits four seconds between API requests.
+
+Configure `ConnectionStrings__sql`, `Ambient__ApiKey`,
+`Ambient__ApplicationKey`, and `Ambient__DeviceMacAddress` in the importer process
+environment. `Ambient__ApiUrl` is optional. Alternatively, put the corresponding
+`ConnectionStrings` and `Ambient` objects in the ignored
+`src/Weather.Import/appsettings.Local.json`; environment variables override it.
+The import host reads its own local settings file. It does not automatically read
+the MCP or REST host's settings. Use SQL credentials with SELECT and INSERT access.
+
+```powershell
+dotnet run --project src/Weather.Import -- --help
+dotnet run --project src/Weather.Import
+# Override the configured station for this run:
+dotnet run --project src/Weather.Import -- --macAddress AA:BB:CC:DD:EE:FF
+```
+
+This command writes data when run. It does not create a database, table, or
+migration. Run it against the existing Weather.Api schema described in
+`docs/database-schema.md`. Exit codes are 0 for success (including no new readings),
+1 for configuration/import failure, and 130 for Ctrl+C cancellation.
+
+Pagination completes before writes begin, matching the original importer's
+all-or-nothing behavior. Readings are buffered in memory, so a large initial
+backfill needs memory proportional to its history. All inserts commit in one
+transaction; errors and cancellation roll back the transaction. Duplicate timestamps
+are ignored, and concurrent import processes serialize their inserts with a SQL
+transaction lock. Existing readings are not overwritten. Restart a failed import
+to retry; partially advanced timestamps cannot hide unimported older pages.
+
+The table has a timestamp-only primary key and no station key, as in the old API.
+Use one station per database; switching stations in the same database can cause
+overlapping timestamps to be treated as existing readings. This incremental command
+does not fill historical gaps older than the newest saved reading.
+
+Tests run the real console host against a local Ambient stub and a disposable
+LocalDB database. They verify every stored column, duplicate/rerun behavior,
+concurrent inserts, transaction rollback, pagination, and cancellation. They never
+run imports against your configured weather database.
 
 ## Current conditions
 
@@ -298,6 +373,10 @@ apply (one request per second per user API key).
 
 ## Build and test
 
+EF migrations, Docker Compose, publish artifacts, and the Azure GitHub Actions
+workflow are documented in [deployment guidance](docs/deployment.md). Database
+migrations are explicit administrative commands; API/MCP startup never applies them.
+
 Install the .NET 10 SDK and ASP.NET Core runtime (included with the SDK). For the
 SQL integration/E2E tests, install SQL Server Express LocalDB on Windows and make
 the `MSSQLLocalDB` instance available under the user running the tests:
@@ -415,13 +494,19 @@ example `Serilog__MinimumLevel__Override__Weather=Debug` for more app detail).
   device payloads to application DTOs and caches results for five minutes.
   A hosted service relays the application weather stream to SignalR clients at
   `/weatherHub`; Socket.IO dependencies and deserialization stay in Infrastructure.
+  Operational health checks live in Infrastructure, with `/health` response
+  formatting and endpoint selection in the REST host.
+- `Weather.Import`: console entry point for the `ImportWeatherHistory` command and
+  handler in UseCases. Infrastructure supplies the full Ambient history adapter and
+  transactional SQL insert adapter. The existing read model maps stored readings;
+  application import DTOs stay independent of EF Core and Ambient payload names.
 
 The REST device routes use Ambient Weather. The shared OData pipeline remains
 available for future SQL history routes. No automatic schema creation,
 migrations, or changes to Weather.Api are performed by either host.
 
-No Core project is needed until domain behavior exists. No persistence or
-mediator is needed. HTTP calls and cancellation flow asynchronously through the
+No Core project is needed until domain behavior exists. No mediator is needed.
+SQL persistence is used by the explicit import workflow. HTTP calls and cancellation flow asynchronously through the
 tool, handler, and provider; transport types stay outside UseCases.
 
 The host uses the [official C# MCP SDK](https://github.com/modelcontextprotocol/csharp-sdk).
