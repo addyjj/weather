@@ -23,6 +23,7 @@ public sealed class DevicesApiTests
     public async Task RestHostMatchesDeviceRoutesResponsesParametersAndCache()
     {
         using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(45));
+        using var listenerCancellation = CancellationTokenSource.CreateLinkedTokenSource(timeout.Token);
         using var reservation = new TcpListener(IPAddress.Loopback, 0);
         reservation.Start();
         var port = ((IPEndPoint)reservation.LocalEndpoint).Port;
@@ -34,11 +35,12 @@ public sealed class DevicesApiTests
         var requests = 0;
         var serve = Task.Run(async () =>
         {
-            while (!timeout.IsCancellationRequested)
+            while (!listenerCancellation.IsCancellationRequested)
             {
                 HttpListenerContext context;
-                try { context = await ambient.GetContextAsync().WaitAsync(timeout.Token); }
-                catch (Exception) when (timeout.IsCancellationRequested || !ambient.IsListening) { break; }
+                try { context = await ambient.GetContextAsync().WaitAsync(listenerCancellation.Token); }
+                catch (OperationCanceledException) when (listenerCancellation.IsCancellationRequested) { break; }
+                catch (HttpListenerException) when (listenerCancellation.IsCancellationRequested) { break; }
                 try
                 {
                     Interlocked.Increment(ref requests);
@@ -115,6 +117,8 @@ public sealed class DevicesApiTests
         }
         finally
         {
+            // Mark shutdown before Stop aborts the pending accept on another thread.
+            listenerCancellation.Cancel();
             ambient.Stop();
             await serve;
         }
