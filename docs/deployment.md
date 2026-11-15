@@ -136,7 +136,8 @@ paths and .NET version and adds verification gates:
    artifacts. It also checks the EF snapshot for unscaffolded changes and rejects
    local settings in published output.
 4. Azure deployment runs after publishing, configures the existing REST host, and
-   verifies liveness, dependency health, and SignalR CORS. The workflow does not
+   verifies liveness, Ambient health, device responses, and SignalR CORS. Database
+   health is required when an Azure SQL connection is configured. The workflow does not
    apply database migrations or run an import.
 
 CI runs on PRs and pushes to `main`/`master`. Azure REST deployment runs on pushes
@@ -169,6 +170,14 @@ command, and sets the app's bound hostnames in `AllowedHosts`. It updates only t
 specified app settings; existing Ambient and SQL credentials remain in App Service.
 It creates no Azure resources or new credentials. The importer remains a downloaded
 one-shot artifact or container; it is not started as an App Service.
+
+If the Azure station MAC is absent, setup selects it only when the existing Ambient
+account has exactly one registered station. Multiple stations require an explicit
+`Ambient__DeviceMacAddress` setting. A missing API URL retains the legacy
+`https://rt.ambientweather.net/v1/` default. Existing credentials are read only within
+the runner process and are never printed. SQL remains optional for this REST host:
+without a connection, deployment emits a notice and `/health/details` truthfully
+reports the database as unconfigured. No local-only SQL connection is copied to Azure.
 
 Use Linux App Services with the .NET 10 runtime. Configure their startup command as
 `dotnet Weather.WebApi.dll` or `dotnet Weather.Mcp.dll`, and set

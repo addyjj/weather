@@ -103,6 +103,7 @@ jobs:
       contents: read
       id-token: write
     steps:
+      - uses: actions/checkout@v7
       - uses: actions/download-artifact@v8
         with:
           name: webapi
@@ -140,6 +141,7 @@ jobs:
           az webapp config appsettings set -g "$resource_group" -n "$APP_NAME" "${slot_args[@]}" \
             --settings "ASPNETCORE_URLS=http://0.0.0.0:8080" "Https__RedirectEnabled=false" \
             "AllowedHosts=$hosts" "Cors__AllowedOrigins__0=$UI_ORIGIN" -o none
+          node scripts/configure-azure-settings.mjs "$resource_group" "$APP_NAME" "$SLOT_NAME"
           echo "url=https://$hostname" >> "$GITHUB_OUTPUT"
       - uses: azure/webapps-deploy@v3
         with:
@@ -150,10 +152,24 @@ jobs:
         env:
           API_URL: ${{ steps.azure-host.outputs.url }}
           UI_ORIGIN: ${{ vars.WEATHER_UI_ORIGIN || 'https://weather-ui-rho.vercel.app' }}
+          DATABASE_CONFIGURED: ${{ steps.azure-host.outputs.database_configured }}
         run: |
           curl --fail --retry 20 --retry-all-errors --retry-delay 10 "$API_URL/health"
-          curl --fail --retry 12 --retry-all-errors --retry-delay 10 "$API_URL/health/details" -o /tmp/health.json
-          jq -e '.status == "Healthy"' /tmp/health.json
+          ready=false
+          for attempt in $(seq 1 12); do
+            status=$(curl --silent --show-error --max-time 30 -o /tmp/health.json -w '%{http_code}' "$API_URL/health/details")
+            if [[ "$status" == 200 || "$status" == 503 ]] && \
+              jq -e '.checks[] | select(.name == "ambient_weather_api") | .status == "Healthy"' /tmp/health.json; then
+              if [ "$DATABASE_CONFIGURED" != true ] || \
+                jq -e '.checks[] | select(.name == "database") | .status == "Healthy"' /tmp/health.json; then
+                ready=true; break
+              fi
+            fi
+            sleep 10
+          done
+          test "$ready" = true
+          curl --fail --silent --retry 3 --retry-all-errors --retry-delay 3 "$API_URL/Devices" -o /tmp/devices.json
+          jq -e 'type == "array" and length > 0' /tmp/devices.json
           curl --fail -s -D /tmp/cors-headers -o /dev/null -X OPTIONS "$API_URL/weatherHub/negotiate?negotiateVersion=1" \
             -H "Origin: $UI_ORIGIN" -H 'Access-Control-Request-Method: POST' \
             -H 'Access-Control-Request-Headers: content-type,x-signalr-user-agent'
