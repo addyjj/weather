@@ -7,7 +7,7 @@ test("loads weather through the real API and receives live SignalR updates", asy
   const errors: string[] = [];
   page.on("pageerror", (error) => errors.push(error.message));
   const rest = page.waitForResponse(
-    (r) => r.url().endsWith("/api/devices") && r.ok(),
+    (r) => /\/(?:api\/)?devices$/.test(new URL(r.url()).pathname) && r.ok(),
   );
   let resolveOldFrame!: () => void;
   const oldFrame = new Promise<void>((resolve) => {
@@ -19,7 +19,12 @@ test("loads weather through the real API and receives live SignalR updates", asy
     }),
   );
   await page.goto("/");
-  await rest;
+  const restResponse = await rest;
+  if (new URL(restResponse.url()).origin !== new URL(page.url()).origin) {
+    expect(await restResponse.headerValue("access-control-allow-origin")).toBe(
+      new URL(page.url()).origin,
+    );
+  }
   await expect(
     page.getByRole("heading", { name: "Backyard station" }),
   ).toBeVisible();
@@ -96,9 +101,12 @@ test("shows loading and an empty state without fabricated readings", async ({
   const ready = new Promise<void>((resolve) => {
     release = resolve;
   });
-  await page.route("**/api/devices", async (route) => {
+  await page.route(/\/(?:api\/)?devices(?:\?|$)/, async (route) => {
     await ready;
-    await route.fulfill({ json: [] });
+    await route.fulfill({
+      json: [],
+      headers: { "access-control-allow-origin": "http://127.0.0.1:5179" },
+    });
   });
   await page.goto("/");
   await expect(
@@ -115,9 +123,10 @@ test("shows loading and an empty state without fabricated readings", async ({
 test("shows an API error instead of zero weather measurements", async ({
   page,
 }) => {
-  await page.route("**/api/devices", (route) =>
+  await page.route(/\/(?:api\/)?devices(?:\?|$)/, (route) =>
     route.fulfill({
       status: 502,
+      headers: { "access-control-allow-origin": "http://127.0.0.1:5179" },
       json: { title: "Weather service unavailable" },
     }),
   );

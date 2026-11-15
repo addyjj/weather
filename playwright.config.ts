@@ -6,7 +6,13 @@ export default defineConfig({
   workers: 1,
   timeout: 30000,
   use: { baseURL: "http://127.0.0.1:5178", trace: "retain-on-failure" },
-  projects: [{ name: "chromium", use: { ...devices["Desktop Chrome"] } }],
+  projects: [
+    { name: "chromium", use: { ...devices["Desktop Chrome"] } },
+    {
+      name: "cross-origin",
+      use: { ...devices["Desktop Chrome"], baseURL: "http://127.0.0.1:5179" },
+    },
+  ],
   webServer: [
     {
       command: "node e2e/start-api.mjs",
@@ -21,6 +27,12 @@ export default defineConfig({
         WEATHER_API_URL: "http://127.0.0.1:5128",
         VITE_API_BASE_URL: "/api",
       },
+      reuseExistingServer: false,
+    },
+    {
+      command: "npm run dev -- --host 127.0.0.1 --port 5179 --strictPort",
+      url: "http://127.0.0.1:5179",
+      env: { VITE_API_BASE_URL: "http://127.0.0.1:5128" },
       reuseExistingServer: false,
     },
   ],

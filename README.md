@@ -8,7 +8,7 @@ Install Node.js 24.13+ and the .NET 10 SDK. From Weather.Mcp, configure Ambient 
 in the environment or ignored `src/Weather.WebApi/appsettings.Local.json`, then run:
 
 ```powershell
-dotnet run --project src/Weather.WebApi --no-launch-profile
+dotnet run --project src/Weather.WebApi --no-launch-profile -- --Https:RedirectEnabled=false
 ```
 
 From weather-ui:
@@ -28,9 +28,16 @@ The dashboard loads the initial reading over REST and receives `weatherData`
 updates from the SignalR hub. Failed initial connections retry; established
 connections reconnect automatically. Older events do not replace newer readings.
 
+To host the UI separately, set `VITE_API_BASE_URL` to the API's HTTPS origin
+(without `/api`), and configure `Cors__AllowedOrigins__0` on the API to the UI's
+origin, without a trailing slash. Additional allowed origins use indices 1, 2, etc.
+The API supports REST and SignalR negotiation with the UI's `withCredentials: false`.
+Use the HTTPS API URL directly; a browser preflight should not rely on redirection.
+The HTTP-only local command above explicitly disables HTTPS redirection.
+
 For production, route `/api/*` to the REST host with the prefix removed and enable
 WebSocket forwarding in the reverse proxy. Vite's development proxy is not included
-in static build output. Direct cross-origin hosting needs explicit API CORS configuration.
+in static build output. Direct cross-origin hosting uses the API CORS configuration described above.
 
 ## Verify
 
@@ -44,6 +51,9 @@ npm run test:e2e
 Playwright starts the real .NET REST/SignalR host, Vite, and a local Ambient HTTP/
 Socket.IO stub. It checks initial weather rendering, live server-pushed readings,
 and loading, empty, and error states. No live Ambient credentials are needed.
-Ports 5128, 5129, and 5178 must be available. Set `WEATHER_API_PROJECT` if the backend
+Ports 5128, 5129, 5178, and 5179 must be available. Set `WEATHER_API_PROJECT` if the backend
 is not at `../Weather.Mcp/src/Weather.WebApi/Weather.WebApi.csproj`.
 Failure traces and screenshots are written to ignored `test-results/`.
+
+Playwright runs the three dashboard scenarios in both proxy and cross-origin modes
+(six tests total), including REST CORS headers and live SignalR updates.

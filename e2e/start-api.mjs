@@ -85,6 +85,8 @@ const api = spawn(
       Ambient__ApiUrl: "http://127.0.0.1:5129/",
       Ambient__SocketUrl: "http://127.0.0.1:5129",
       Ambient__ApiKey: "e2e-api",
+      Cors__AllowedOrigins__0: "http://127.0.0.1:5179",
+      Https__RedirectEnabled: "false",
       Ambient__ApplicationKey: "e2e-app",
     },
   },
