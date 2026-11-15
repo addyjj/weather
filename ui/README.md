@@ -1,19 +1,20 @@
 # Weather UI
 
-React dashboard for the REST and SignalR host in the sibling Weather.Mcp repository.
+React dashboard for the REST and SignalR host in this repository. The frontend lives in `ui/`; the .NET solution lives at the repository root.
 
 ## Run locally
 
-Install Node.js 24.13+ and the .NET 10 SDK. From Weather.Mcp, configure Ambient credentials
+Install Node.js 24.13+ and the .NET 10 SDK. From the repository root, configure Ambient credentials
 in the environment or ignored `src/Weather.WebApi/appsettings.Local.json`, then run:
 
 ```powershell
 dotnet run --project src/Weather.WebApi --no-launch-profile -- --Https:RedirectEnabled=false
 ```
 
-From weather-ui:
+In another terminal, from the repository root:
 
 ```powershell
+cd ui
 npm ci
 npm run dev
 ```
@@ -52,7 +53,7 @@ Playwright starts the real .NET REST/SignalR host, Vite, and a local Ambient HTT
 Socket.IO stub. It checks initial weather rendering, live server-pushed readings,
 and loading, empty, and error states. No live Ambient credentials are needed.
 Ports 5128, 5129, 5178, and 5179 must be available. Set `WEATHER_API_PROJECT` if the backend
-is not at `../Weather.Mcp/src/Weather.WebApi/Weather.WebApi.csproj`.
+is not at `../src/Weather.WebApi/Weather.WebApi.csproj`.
 Failure traces and screenshots are written to ignored `test-results/`.
 
 Playwright runs the three dashboard scenarios in both proxy and cross-origin modes

@@ -70,7 +70,7 @@ io.on("connection", (socket) => {
 ambient.listen(5129, "127.0.0.1");
 const project = resolve(
   process.env.WEATHER_API_PROJECT ||
-    "../Weather.Mcp/src/Weather.WebApi/Weather.WebApi.csproj",
+    "../src/Weather.WebApi/Weather.WebApi.csproj",
 );
 const api = spawn(
   "dotnet",

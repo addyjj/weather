@@ -16,3 +16,5 @@ artifacts
 **/*.pfx
 **/*.pem
 **/*.key
+
+ui/

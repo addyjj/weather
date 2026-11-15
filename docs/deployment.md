@@ -104,7 +104,7 @@ Normal `compose up` does not import data or apply migrations. The migration imag
 is Linux x64. All targets use .NET 10. Local settings files and development
 credentials are excluded from both image contexts and published app artifacts.
 
-The sibling UI's Vite proxy continues to use `http://localhost:5001`; set
+The UI's Vite proxy continues to use `http://localhost:5001`; set
 `WEATHER_API_URL` in the UI process if the mapped API port changes. Production UI
 hosting can use a reverse proxy forwarding `/api` (including WebSockets) to the API
 with the prefix stripped. To call the API directly from a different origin, set
@@ -132,7 +132,7 @@ paths and .NET version and adds verification gates:
 1. Windows builds/tests the full solution using disposable LocalDB databases.
 2. Linux validates Compose, builds all four Docker targets, and smoke-tests the
    importer/migrator help commands, REST liveness, and MCP initialization.
-3. After both pass, Linux publishes API, MCP, importer, and reviewed migration
+3. After all verification jobs pass, Linux publishes API, MCP, importer, and reviewed migration
    artifacts. It also checks the EF snapshot for unscaffolded changes and rejects
    local settings in published output.
 4. Azure deployment runs after publishing, configures the existing REST host, and
@@ -140,20 +140,20 @@ paths and .NET version and adds verification gates:
    health is required when an Azure SQL connection is configured. The workflow does not
    apply database migrations or run an import.
 
-CI runs on PRs and pushes to `main`/`master`. Azure REST deployment runs on pushes
-to `main` or manual `workflow_dispatch` from `main`. It defaults to the existing
-`weather-api` App Service and Production slot. A push to `master` verifies/publishes
-without deploying. New repositories can configure these OIDC secrets:
+CI runs on PRs and pushes to `main`/`master`. The UI job builds the dashboard and
+Storybook, runs component tests, and runs Playwright against the real API with a
+local Ambient stub. The static dashboard is uploaded as the `ui` artifact.
+
+Azure deployment is disabled until repository variable `AZURE_DEPLOY_ENABLED` is
+set to `true`. This new repository does not inherit secrets or federated identity
+credentials from `weather-api`. Before enabling deployment, configure:
 
 - `AZURE_CLIENT_ID`
 - `AZURE_TENANT_ID`
 - `AZURE_SUBSCRIPTION_ID`
 
-This repository already has Azure Deployment Center-generated client/tenant/
-subscription secrets, which the workflow uses as fallbacks for those generic names.
-Authentication keeps the original main-branch OIDC subject, without introducing a
-different environment subject. For another repository, create the corresponding
-main-branch Azure federated identity credential and grant deployment permission
+Add an Azure federated identity credential with subject
+`repo:addyjj/weather:ref:refs/heads/main` and grant deployment permission
 for the selected apps. Optional repository variables:
 
 | GitHub variable | Purpose |
@@ -197,3 +197,13 @@ Changes to SQL remain a separate, reviewed migration step. Run them using a
 database deployment identity with DDL permissions; runtime identities need only
 their normal read/import permissions. Review migration artifacts before promoting
 an application version that depends on schema changes.
+
+## Frontend hosting from the monorepo
+
+The UI builds independently with `npm ci` and `npm run build` from `ui/`, producing
+`ui/dist/`. To reconnect the existing Vercel project, select `addyjj/weather` as its
+Git repository and set Root Directory to `ui`, retaining its existing environment
+variables and domains. Use `npm run build` and output directory `dist`.
+The original repository connections and production deployments are unchanged by
+creating this repository. GitHub secrets, Azure OIDC setup, and Vercel Git links
+must be configured before switching production automation to this repository.

@@ -1,4 +1,14 @@
-# Weather MCP server and REST API
+# Weather
+
+A weather dashboard, REST/SignalR API, MCP server, and history importer in one repository.
+
+- `ui/`: React/Vite dashboard, component tests, Storybook, and browser end-to-end tests.
+- `src/` and `tests/`: .NET services and their tests, built with `Weather.slnx`.
+- `docs/`: database schema and deployment guidance.
+
+The API and UI Git histories are preserved from `addyjj/weather-api` and
+`addyjj/weather-ui`. Both applications remain independently buildable and deployable.
+See [UI setup](ui/README.md) for frontend commands and the sections below for backend setup.
 
 A .NET 10 Streamable HTTP MCP server with two tools:
 
@@ -69,9 +79,9 @@ to `https://rt2.ambientweather.net`. Disconnected feeds retry after ten seconds 
 resubscribe. HTTP device queries continue working while the feed is unavailable.
 Chat streaming and background database imports are outside this host's scope.
 
-The sibling `weather-ui` project proxies `/api/devices` and `/api/weatherHub` to
+The `ui/` project proxies `/api/devices` and `/api/weatherHub` to
 this host, including WebSocket upgrades. Start the API with `--no-launch-profile`
-as above to use port 5001, then run `npm run dev` from `weather-ui`. Set
+as above to use port 5001, then run `npm run dev` from `ui/`. Set
 `WEATHER_API_URL` on the UI development process if you use another backend port.
 Its `npm run test:e2e` command uses Playwright, the real API host, and a local
 Ambient HTTP/Socket.IO stub to verify initial readings, live updates, reconnects,
