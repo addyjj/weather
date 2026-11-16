@@ -58,3 +58,13 @@ Failure traces and screenshots are written to ignored `test-results/`.
 
 Playwright runs the three dashboard scenarios in both proxy and cross-origin modes
 (six tests total), including REST CORS headers and live SignalR updates.
+
+## Azure hosting
+
+The proposed frontend host is Azure Static Web Apps **Free**. Review the
+[Azure resource inventory](../infra/README.md) before creating resources or publishing.
+Build with `VITE_API_BASE_URL` set to the provisioned API's HTTPS origin, without
+`/api`. The template permits the exact Static Web App origin on the API. This
+uses the existing cross-origin flow and does not require a paid linked backend.
+`public/staticwebapp.config.json` supplies SPA fallback in the static build.
+No Vercel configuration or service is required.

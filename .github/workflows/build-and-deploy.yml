@@ -1,4 +1,4 @@
-name: Build, test, and deploy weather services
+name: Build, test, and publish weather artifacts
 
 on:
   push:
@@ -63,6 +63,27 @@ jobs:
             ui/test-results
             ui/playwright-report
 
+  infrastructure:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 24
+      - run: az bicep install
+      - name: Compile and test the free-only infrastructure plan
+        run: |
+          az bicep build --file infra/main.bicep --outfile artifacts/infra/main.json
+          node --test infra/*.test.mjs
+      - name: Compile parameter bindings with nonsecret test values
+        env:
+          WEATHER_SQL_ADMIN_OBJECT_ID: '00000000-0000-0000-0000-000000000001'
+          WEATHER_SQL_ADMIN_LOGIN: 'ci@example.invalid'
+          WEATHER_AMBIENT_API_KEY: 'ci-placeholder'
+          WEATHER_AMBIENT_APPLICATION_KEY: 'ci-placeholder'
+          WEATHER_AMBIENT_MAC_ADDRESS: 'ci-station'
+        run: az bicep build-params --file infra/main.bicepparam --outfile artifacts/infra/parameters.json
+
   containers:
     runs-on: ubuntu-latest
     steps:
@@ -90,7 +111,7 @@ jobs:
         run: docker compose --env-file .env.example --profile tools down
 
   publish:
-    needs: [tests, ui, containers]
+    needs: [tests, ui, infrastructure, containers]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
@@ -127,106 +148,3 @@ jobs:
         with:
           name: database
           path: artifacts/database
-
-  deploy-webapi:
-    needs: publish
-    if: vars.AZURE_DEPLOY_ENABLED == 'true' && github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
-    runs-on: ubuntu-latest
-    permissions:
-      contents: read
-      id-token: write
-    steps:
-      - uses: actions/checkout@v7
-      - uses: actions/download-artifact@v8
-        with:
-          name: webapi
-          path: package
-      - uses: azure/login@v2
-        with:
-          client-id: ${{ secrets.AZURE_CLIENT_ID || secrets.AZUREAPPSERVICE_CLIENTID_DA30CB8E084F407C8E014A17CE6B638D }}
-          tenant-id: ${{ secrets.AZURE_TENANT_ID || secrets.AZUREAPPSERVICE_TENANTID_4D023636D5E24DEEA3F2E4692EBB5DCF }}
-          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID || secrets.AZUREAPPSERVICE_SUBSCRIPTIONID_5180F5D8922B4BCE98976EC3C8BB7297 }}
-      - name: Configure existing Azure API host
-        id: azure-host
-        env:
-          APP_NAME: ${{ vars.AZURE_WEBAPP_NAME || 'weather-api' }}
-          SLOT_NAME: ${{ vars.AZURE_WEBAPP_SLOT || 'Production' }}
-          UI_ORIGIN: ${{ vars.WEATHER_UI_ORIGIN || 'https://weather-ui-rho.vercel.app' }}
-        run: |
-          resource_group=$(az webapp list --query "[?name=='$APP_NAME'].resourceGroup | [0]" -o tsv)
-          test -n "$resource_group" && test "$resource_group" != None
-          slot_args=()
-          if [ "$SLOT_NAME" != Production ] && [ "$SLOT_NAME" != production ]; then
-            slot_args=(--slot "$SLOT_NAME")
-          fi
-          kind=$(az webapp show -g "$resource_group" -n "$APP_NAME" "${slot_args[@]}" --query kind -o tsv)
-          if [[ "$kind" == *linux* ]]; then
-            az webapp config set -g "$resource_group" -n "$APP_NAME" "${slot_args[@]}" \
-              --linux-fx-version 'DOTNETCORE|10.0' --startup-file 'dotnet Weather.WebApi.dll' \
-              --web-sockets-enabled true -o none
-          else
-            az webapp config set -g "$resource_group" -n "$APP_NAME" "${slot_args[@]}" \
-              --web-sockets-enabled true -o none
-          fi
-          az webapp update -g "$resource_group" -n "$APP_NAME" "${slot_args[@]}" --https-only true -o none
-          hostname=$(az webapp show -g "$resource_group" -n "$APP_NAME" "${slot_args[@]}" --query defaultHostName -o tsv)
-          hosts=$(az webapp show -g "$resource_group" -n "$APP_NAME" "${slot_args[@]}" --query "join(';', hostNames)" -o tsv)
-          az webapp config appsettings set -g "$resource_group" -n "$APP_NAME" "${slot_args[@]}" \
-            --settings "ASPNETCORE_URLS=http://0.0.0.0:8080" "Https__RedirectEnabled=false" \
-            "AllowedHosts=$hosts" "Cors__AllowedOrigins__0=$UI_ORIGIN" -o none
-          node scripts/configure-azure-settings.mjs "$resource_group" "$APP_NAME" "$SLOT_NAME"
-          echo "url=https://$hostname" >> "$GITHUB_OUTPUT"
-      - uses: azure/webapps-deploy@v3
-        with:
-          app-name: ${{ vars.AZURE_WEBAPP_NAME || 'weather-api' }}
-          slot-name: ${{ vars.AZURE_WEBAPP_SLOT || 'Production' }}
-          package: package
-      - name: Verify deployed API
-        env:
-          API_URL: ${{ steps.azure-host.outputs.url }}
-          UI_ORIGIN: ${{ vars.WEATHER_UI_ORIGIN || 'https://weather-ui-rho.vercel.app' }}
-          DATABASE_CONFIGURED: ${{ steps.azure-host.outputs.database_configured }}
-        run: |
-          curl --fail --retry 20 --retry-all-errors --retry-delay 10 "$API_URL/health"
-          ready=false
-          for attempt in $(seq 1 12); do
-            status=$(curl --silent --show-error --max-time 30 -o /tmp/health.json -w '%{http_code}' "$API_URL/health/details")
-            if [[ "$status" == 200 || "$status" == 503 ]] && \
-              jq -e '.checks[] | select(.name == "ambient_weather_api") | .status == "Healthy"' /tmp/health.json; then
-              if [ "$DATABASE_CONFIGURED" != true ] || \
-                jq -e '.checks[] | select(.name == "database") | .status == "Healthy"' /tmp/health.json; then
-                ready=true; break
-              fi
-            fi
-            sleep 10
-          done
-          test "$ready" = true
-          curl --fail --silent --retry 3 --retry-all-errors --retry-delay 3 "$API_URL/Devices" -o /tmp/devices.json
-          jq -e 'type == "array" and length > 0' /tmp/devices.json
-          curl --fail -s -D /tmp/cors-headers -o /dev/null -X OPTIONS "$API_URL/weatherHub/negotiate?negotiateVersion=1" \
-            -H "Origin: $UI_ORIGIN" -H 'Access-Control-Request-Method: POST' \
-            -H 'Access-Control-Request-Headers: content-type,x-signalr-user-agent'
-          grep -iq "access-control-allow-origin: $UI_ORIGIN" /tmp/cors-headers
-
-  deploy-mcp:
-    needs: publish
-    if: vars.AZURE_DEPLOY_ENABLED == 'true' && github.event_name != 'pull_request' && github.ref == 'refs/heads/main' && vars.AZURE_MCP_WEBAPP_NAME != ''
-    runs-on: ubuntu-latest
-    permissions:
-      contents: read
-      id-token: write
-    steps:
-      - uses: actions/download-artifact@v8
-        with:
-          name: mcp
-          path: package
-      - uses: azure/login@v2
-        with:
-          client-id: ${{ secrets.AZURE_CLIENT_ID || secrets.AZUREAPPSERVICE_CLIENTID_DA30CB8E084F407C8E014A17CE6B638D }}
-          tenant-id: ${{ secrets.AZURE_TENANT_ID || secrets.AZUREAPPSERVICE_TENANTID_4D023636D5E24DEEA3F2E4692EBB5DCF }}
-          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID || secrets.AZUREAPPSERVICE_SUBSCRIPTIONID_5180F5D8922B4BCE98976EC3C8BB7297 }}
-      - uses: azure/webapps-deploy@v3
-        with:
-          app-name: ${{ vars.AZURE_MCP_WEBAPP_NAME }}
-          slot-name: ${{ vars.AZURE_MCP_WEBAPP_SLOT || 'Production' }}
-          package: package

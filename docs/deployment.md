@@ -124,86 +124,38 @@ store, and are never copied into containers or deployment artifacts. Production
 uses environment/App Service settings instead. See the README for secret commands
 and configuration precedence.
 
-## GitHub Actions and Azure App Service
+## Azure-only free-tier infrastructure and hosting
 
-`.github/workflows/build-and-deploy.yml` replaces the old Azure workflow's project
-paths and .NET version and adds verification gates:
+The current hosting proposal is declared in `infra/main.bicep`. See the
+[complete resource inventory, free limits, and review-first deployment steps](../infra/README.md).
+It uses Static Web Apps Free for the dashboard, a shared F1 Linux App Service plan
+for REST/SignalR and MCP, and the Azure SQL free offer with monthly-limit AutoPause.
+The UI calls the API directly over HTTPS; its production build receives the actual
+API URL via `VITE_API_BASE_URL`. The Bicep template sets the matching CORS origin.
+Vercel and Static Web Apps paid linked-backend features are not required.
 
-1. Windows builds/tests the full solution using disposable LocalDB databases.
-2. Linux validates Compose, builds all four Docker targets, and smoke-tests the
-   importer/migrator help commands, REST liveness, and MCP initialization.
-3. After all verification jobs pass, Linux publishes API, MCP, importer, and reviewed migration
-   artifacts. It also checks the EF snapshot for unscaffolded changes and rejects
-   local settings in published output.
-4. Azure deployment runs after publishing, configures the existing REST host, and
-   verifies liveness, Ambient health, device responses, and SignalR CORS. Database
-   health is required when an Azure SQL connection is configured. The workflow does not
-   apply database migrations or run an import.
+App Service and SQL target West US 3; Static Web Apps remains in West US 2.
+West US 2 SQL provisioning failed despite a successful what-if. Run the SQL regional
+capability check and full `what-if` before every deployment. Never substitute a
+paid SKU or enable SQL paid overages to bypass a quota failure.
 
-CI runs on PRs and pushes to `main`/`master`. The UI job builds the dashboard and
-Storybook, runs component tests, and runs Playwright against the real API with a
-local Ambient stub. The static dashboard is uploaded as the `ui` artifact.
+The old weather resource group and its deployment identity were deleted. The
+former GitHub secrets, Azure OIDC assumptions, App Service settings, and Vercel
+origin are not used by this plan. Initial deployment uses the authenticated human
+Azure CLI session. Runtime SQL access uses the web apps' system-assigned managed
+identities and explicit least-privilege database grants; no SQL password is stored.
 
-Azure deployment is disabled until repository variable `AZURE_DEPLOY_ENABLED` is
-set to `true`. This new repository does not inherit secrets or federated identity
-credentials from `weather-api`. Before enabling deployment, configure:
+## GitHub Actions verification and artifacts
 
-- `AZURE_CLIENT_ID`
-- `AZURE_TENANT_ID`
-- `AZURE_SUBSCRIPTION_ID`
+`.github/workflows/build-and-deploy.yml` runs on PRs, pushes to `main`/`master`,
+and manual dispatch. It builds/tests .NET with disposable LocalDB, builds/tests the
+UI and Storybook, runs browser workflows in proxy and cross-origin modes, validates
+the free-only Bicep resource inventory, and validates/smoke-tests the Docker images.
+After all verification jobs pass, it publishes downloadable webapi, MCP, importer,
+UI, and database migration artifacts. It does not provision resources, deploy to
+Azure, apply migrations, or run imports on a push. Publishing an artifact in CI is
+not publishing the application to the internet.
 
-Add an Azure federated identity credential with subject
-`repo:addyjj/weather:ref:refs/heads/main` and grant deployment permission
-for the selected apps. Optional repository variables:
-
-| GitHub variable | Purpose |
-| --- | --- |
-| `AZURE_WEBAPP_NAME` | REST App Service name; defaults to `weather-api` |
-| `AZURE_WEBAPP_SLOT` | REST slot; defaults to `Production` |
-| `AZURE_MCP_WEBAPP_NAME` | Optional MCP App Service name; blank skips MCP deployment |
-| `AZURE_MCP_WEBAPP_SLOT` | MCP slot; defaults to `Production` |
-
-`WEATHER_UI_ORIGIN` overrides the existing production UI origin,
-`https://weather-ui-rho.vercel.app`, used for REST/SignalR CORS. The workflow enables
-HTTPS-only access and WebSockets, configures the .NET 10 Linux runtime/startup
-command, and sets the app's bound hostnames in `AllowedHosts`. It updates only the
-specified app settings; existing Ambient and SQL credentials remain in App Service.
-It creates no Azure resources or new credentials. The importer remains a downloaded
-one-shot artifact or container; it is not started as an App Service.
-
-If the Azure station MAC is absent, setup selects it only when the existing Ambient
-account has exactly one registered station. Multiple stations require an explicit
-`Ambient__DeviceMacAddress` setting. A missing API URL retains the legacy
-`https://rt.ambientweather.net/v1/` default. Existing credentials are read only within
-the runner process and are never printed. SQL remains optional for this REST host:
-without a connection, deployment emits a notice and `/health/details` truthfully
-reports the database as unconfigured. No local-only SQL connection is copied to Azure.
-
-Use Linux App Services with the .NET 10 runtime. Configure their startup command as
-`dotnet Weather.WebApi.dll` or `dotnet Weather.Mcp.dll`, and set
-`ASPNETCORE_URLS=http://0.0.0.0:8080` (or the port required by the selected host).
-Enable App Service's HTTPS-only setting and set `Https__RedirectEnabled=false`
-for the HTTP backend to avoid redirect loops after TLS termination.
-Set `AllowedHosts` to each app's actual hostname, and configure
-`ConnectionStrings__sql`, `Ambient__ApiKey`, `Ambient__ApplicationKey`,
-`Ambient__DeviceMacAddress`, and any custom Ambient URLs as App Service settings.
-Keep secrets out of GitHub artifacts. Enable WebSockets for the REST app, keep its
-instance count at one for the existing in-process SignalR broadcast behavior, and
-use HTTPS/access controls when exposing either host remotely. Set the App Service
-health-check path to `/health`; use `/health/details` separately for dependency
-diagnostics and account for Ambient API quotas.
-
-Changes to SQL remain a separate, reviewed migration step. Run them using a
-database deployment identity with DDL permissions; runtime identities need only
-their normal read/import permissions. Review migration artifacts before promoting
-an application version that depends on schema changes.
-
-## Frontend hosting from the monorepo
-
-The UI builds independently with `npm ci` and `npm run build` from `ui/`, producing
-`ui/dist/`. To reconnect the existing Vercel project, select `addyjj/weather` as its
-Git repository and set Root Directory to `ui`, retaining its existing environment
-variables and domains. Use `npm run build` and output directory `dist`.
-The original repository connections and production deployments are unchanged by
-creating this repository. GitHub secrets, Azure OIDC setup, and Vercel Git links
-must be configured before switching production automation to this repository.
+Follow the approved manual Bicep and application deployment commands in
+`infra/README.md`. Any future automated Azure deployment identity and permissions
+must be added to the resource inventory before creation.

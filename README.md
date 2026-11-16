@@ -5,6 +5,7 @@ A weather dashboard, REST/SignalR API, MCP server, and history importer in one r
 - `ui/`: React/Vite dashboard, component tests, Storybook, and browser end-to-end tests.
 - `src/` and `tests/`: .NET services and their tests, built with `Weather.slnx`.
 - `docs/`: database schema and deployment guidance.
+- `infra/`: free-tier Azure Bicep templates and the pre-deployment resource inventory.
 
 The API and UI Git histories are preserved from `addyjj/weather-api` and
 `addyjj/weather-ui`. Both applications remain independently buildable and deployable.
@@ -23,6 +24,18 @@ to the existing table when explicitly run.
 
 The solution also includes a separate REST API host with the device endpoints
 from `Weather.Api`. Both hosts share the application and infrastructure projects.
+
+## Azure hosting
+
+The Azure deployment hosts the dashboard on Static Web Apps Free, both .NET
+hosts on a shared F1 App Service plan, and history in the Azure SQL free offer
+with AutoPause at its free limit. No Vercel dependency is needed. Free quotas mean
+sleeping, cold starts, and possible interruptions; the template never upgrades to
+a paid tier automatically.
+
+Review the [complete resource inventory and deployment steps](infra/README.md)
+before creating resources or publishing. See [current deployment status and URLs](docs/azure-status.md). CI validates the templates and publishes
+build artifacts; pushes do not automatically create or deploy Azure resources.
 
 ## REST API
 
