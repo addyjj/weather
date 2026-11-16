@@ -22,7 +22,9 @@ IF DATABASE_PRINCIPAL_ID(N'weather-api') IS NULL
 IF DATABASE_PRINCIPAL_ID(N'weather-mcp') IS NULL
     EXEC(N'CREATE USER [weather-mcp] WITH SID = ' + @mcpSidLiteral + N', TYPE = E;');
 
+-- The triggered importer shares the API app's managed identity.
 GRANT CONNECT TO [weather-api];
+GRANT SELECT, INSERT ON OBJECT::dbo.DeviceData TO [weather-api];
 GRANT CONNECT TO [weather-mcp];
 GRANT SELECT ON OBJECT::dbo.DeviceData TO [weather-mcp];
 COMMIT;

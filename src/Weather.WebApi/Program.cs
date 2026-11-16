@@ -16,7 +16,9 @@ builder.Configuration
     .AddEnvironmentVariables()
     .AddCommandLine(args);
 builder.WebHost.UseUrls(builder.Configuration["urls"] ?? "http://localhost:5001");
-builder.Configuration["AllowedHosts"] ??= "localhost;127.0.0.1;[::1]";
+// Keep API host filtering separate from settings inherited by KuduAgent.
+builder.Configuration["AllowedHosts"] = builder.Configuration["WeatherHttp:AllowedHosts"]
+    ?? builder.Configuration["AllowedHosts"] ?? "localhost;127.0.0.1;[::1]";
 builder.Services.AddControllers();
 builder.Services.AddSignalR();
 var allowedOrigins = builder.Configuration.GetSection("Cors:AllowedOrigins").Get<string[]>()?

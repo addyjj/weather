@@ -7,8 +7,7 @@ A weather dashboard, REST/SignalR API, MCP server, and history importer in one r
 - `docs/`: database schema and deployment guidance.
 - `infra/`: free-tier Azure Bicep templates and the pre-deployment resource inventory.
 
-The API and UI Git histories are preserved from `addyjj/weather-api` and
-`addyjj/weather-ui`. Both applications remain independently buildable and deployable.
+The dashboard and backend services are independently buildable and deployable.
 See [UI setup](ui/README.md) for frontend commands and the sections below for backend setup.
 
 A .NET 10 Streamable HTTP MCP server with two tools:
@@ -19,17 +18,17 @@ A .NET 10 Streamable HTTP MCP server with two tools:
   OData filters, projections, aggregates, sorting, and pagination.
 
 Historical queries use SQL only. The MCP and REST hosts do not import data or
-change your database schema. A separate console importer can add Ambient history
-to the existing table when explicitly run.
+change your database schema. An on-demand Azure WebJob imports Ambient history
+into the existing table when explicitly run.
 
-The solution also includes a separate REST API host with the device endpoints
-from `Weather.Api`. Both hosts share the application and infrastructure projects.
+The REST API host provides device endpoints and live SignalR updates. Both hosts
+share the application and infrastructure projects.
 
 ## Azure hosting
 
 The Azure deployment hosts the dashboard on Static Web Apps Free, both .NET
 hosts on a shared F1 App Service plan, and history in the Azure SQL free offer
-with AutoPause at its free limit. No Vercel dependency is needed. Free quotas mean
+with AutoPause at its free limit. Free quotas mean
 sleeping, cold starts, and possible interruptions; the template never upgrades to
 a paid tier automatically.
 
@@ -64,7 +63,7 @@ Invoke-RestMethod 'http://localhost:5001/Devices'
 Invoke-RestMethod 'http://localhost:5001/Devices/AA:BB:CC:DD:EE:FF/data?endDate=2026-11-14T12:00:00Z&limit=10'
 ```
 
-Both routes preserve Weather.Api's camel-case JSON contracts. Readings contain
+Both routes use camel-case JSON contracts. Readings contain
 `date`, `baromRel`, `tempOut`, `humidityOut`, `windDir`, `windSpeed`, `windGust`,
 `eventRain`, `dailyRain`, `uvIndex`, `feelsLike`, `dewPoint`, and `solarRadiation`.
 Missing device names/locations become empty strings, and missing reading fields
@@ -78,7 +77,7 @@ Local settings are copied beside the development executable and excluded from
 publish output. Environment variables override local settings.
 
 Results are cached for five minutes, separately for each device/date/limit
-combination, matching Weather.Api's cache duration. These endpoints read Ambient
+combination. These endpoints read Ambient
 Weather directly and do not need SQL configuration. Upstream failures return
 HTTP 502 Problem Details without upstream response bodies or credentials.
 The REST host defaults to loopback with local hostnames and does not enable CORS
@@ -177,15 +176,22 @@ Invoke-RestMethod 'http://localhost:5001/health'
 Invoke-RestMethod 'http://localhost:5001/health/details'
 ```
 
-## Import Ambient history
+## Import Ambient history with a WebJob
 
-`Weather.Import` replaces the old Weather.Api console import command. It reads
+The triggered `weather-import` WebJob runs alongside the Azure REST API. Run it in
+the API app's **WebJobs** page and view progress in its run logs. It has no schedule
+and does not run on application startup. See [WebJob deployment](docs/deployment.md#import-webjob).
+It inherits the API app's Ambient settings and managed-identity SQL connection;
+that identity has SELECT and INSERT on `dbo.DeviceData`, with no UPDATE, DELETE,
+or schema permissions. No SQL password or extra Azure resource is required.
+
+`Weather.Import`, the WebJob executable, reads
 Ambient history backward from now until reaching the newest saved `DateUtc`,
 then adds only newer readings to the existing `dbo.DeviceData` table. It preserves
 all stored weather fields, including indoor sensors and numeric/boolean battery
-flags. Like the original importer, it waits four seconds between API requests.
+flags. It waits four seconds between API requests.
 
-Configure `ConnectionStrings__sql`, `Ambient__ApiKey`,
+For a local diagnostic run, configure `ConnectionStrings__sql`, `Ambient__ApiKey`,
 `Ambient__ApplicationKey`, and `Ambient__DeviceMacAddress` in the importer process
 environment. `Ambient__ApiUrl` is optional. Alternatively, put the corresponding
 `ConnectionStrings` and `Ambient` objects in the ignored
@@ -201,19 +207,19 @@ dotnet run --project src/Weather.Import -- --macAddress AA:BB:CC:DD:EE:FF
 ```
 
 This command writes data when run. It does not create a database, table, or
-migration. Run it against the existing Weather.Api schema described in
+migration. Run it against the database schema described in
 `docs/database-schema.md`. Exit codes are 0 for success (including no new readings),
-1 for configuration/import failure, and 130 for Ctrl+C cancellation.
+1 for configuration/import failure, and 130 for cancellation. App Service shutdown,
+SIGTERM/Ctrl+C, and Kudu's shutdown-file signal cancel the import without partial writes.
 
-Pagination completes before writes begin, matching the original importer's
-all-or-nothing behavior. Readings are buffered in memory, so a large initial
-backfill needs memory proportional to its history. All inserts commit in one
+Pagination completes before writes begin. Readings are buffered in memory, so a
+large initial backfill needs memory proportional to its history. All inserts commit in one
 transaction; errors and cancellation roll back the transaction. Duplicate timestamps
 are ignored, and concurrent import processes serialize their inserts with a SQL
 transaction lock. Existing readings are not overwritten. Restart a failed import
 to retry; partially advanced timestamps cannot hide unimported older pages.
 
-The table has a timestamp-only primary key and no station key, as in the old API.
+The table has a timestamp-only primary key and no station key.
 Use one station per database; switching stations in the same database can cause
 overlapping timestamps to be treated as existing readings. This incremental command
 does not fill historical gaps older than the newest saved reading.
@@ -422,7 +428,7 @@ connections return errors without connection strings or database credentials.
 
 ## Ambient Weather configuration
 
-Uses the same `Ambient` settings and authentication as Weather.Api. Set these
+Both hosts use the same `Ambient` settings and authentication. Set these
 environment variables in the running server process's environment:
 
 ```text
@@ -439,7 +445,7 @@ it is excluded from publish output. Environment variables override this file.
 Keep credentials out of source control. ApiUrl defaults to the URL above.
 
 Each call requests `/devices/{macAddress}?limit=1` using the two keys in query
-parameters, as in Weather.Api. Missing outdoor readings and HTTP failures return
+parameters. Missing outdoor readings and HTTP failures return
 tool errors. Calls are not cached; Ambient Weather's [API rate limits](https://ambientweather.docs.apiary.io/)
 apply (one request per second per user API key).
 
@@ -577,14 +583,14 @@ example `Serilog__MinimumLevel__Override__Weather=Debug` for more app detail).
   `/weatherHub`; Socket.IO dependencies and deserialization stay in Infrastructure.
   Operational health checks live in Infrastructure, with `/health` response
   formatting and endpoint selection in the REST host.
-- `Weather.Import`: console entry point for the `ImportWeatherHistory` command and
+- `Weather.Import`: triggered WebJob entry point for the `ImportWeatherHistory` command and
   handler in UseCases. Infrastructure supplies the full Ambient history adapter and
   transactional SQL insert adapter. The existing read model maps stored readings;
   application import DTOs stay independent of EF Core and Ambient payload names.
 
 The REST device routes use Ambient Weather. The shared OData pipeline remains
 available for future SQL history routes. No automatic schema creation,
-migrations, or changes to Weather.Api are performed by either host.
+or migrations are performed by either host.
 
 No Core project is needed until domain behavior exists. No mediator is needed.
 SQL persistence is used by the explicit import workflow. HTTP calls and cancellation flow asynchronously through the

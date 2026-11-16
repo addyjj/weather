@@ -42,7 +42,22 @@ public sealed class WeatherImportCliTests
         Assert.DoesNotContain("secret", result.Output + result.Error);
     }
 
-    private static async Task<(int ExitCode, string Output, string Error)> RunAsync(string[] args, string? missing = null)
+    [Fact]
+    public async Task WebJobShutdownFileCancelsBeforeSqlOrAmbientAccess()
+    {
+        var shutdownFile = Path.GetTempFileName();
+        try
+        {
+            var result = await RunAsync([], shutdownFile: shutdownFile);
+            Assert.Equal(130, result.ExitCode);
+            Assert.Contains("Import canceled.", result.Error);
+            Assert.DoesNotContain("Importing", result.Output);
+            Assert.DoesNotContain("secret", result.Output + result.Error);
+        }
+        finally { File.Delete(shutdownFile); }
+    }
+
+    private static async Task<(int ExitCode, string Output, string Error)> RunAsync(string[] args, string? missing = null, string? shutdownFile = null)
     {
         var root = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "../../../../../"));
         var configuration = new DirectoryInfo(AppContext.BaseDirectory).Parent!.Name;
@@ -61,6 +76,8 @@ public sealed class WeatherImportCliTests
         info.Environment["Ambient__ApiKey"] = "secret-api";
         info.Environment["Ambient__ApplicationKey"] = "secret-app";
         info.Environment["Ambient__DeviceMacAddress"] = "test-station";
+        info.Environment.Remove("WEBJOBS_SHUTDOWN_FILE");
+        if (shutdownFile is not null) info.Environment["WEBJOBS_SHUTDOWN_FILE"] = shutdownFile;
         if (missing is not null) info.Environment[missing] = " ";
         using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(15));
         using var process = Process.Start(info)!;

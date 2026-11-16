@@ -119,11 +119,16 @@ jobs:
         with:
           dotnet-version: 10.0.x
       - run: dotnet tool restore
+      - name: Publish API and triggered import WebJob
+        shell: pwsh
+        run: ./infra/Publish-WebApi.ps1
+      - name: Verify the packaged WebJob
+        run: |
+          chmod +x artifacts/webapi/App_Data/jobs/triggered/weather-import/run.sh
+          artifacts/webapi/App_Data/jobs/triggered/weather-import/run.sh --help
       - name: Publish services and migration artifacts
         run: |
-          dotnet publish src/Weather.WebApi -c Release -o artifacts/webapi
           dotnet publish src/Weather.Mcp -c Release -o artifacts/mcp
-          dotnet publish src/Weather.Import -c Release -o artifacts/import
           dotnet ef migrations has-pending-model-changes --project src/Weather.Infrastructure --configuration Release
           mkdir -p artifacts/database
           dotnet ef migrations script --idempotent --project src/Weather.Infrastructure --configuration Release -o artifacts/database/migrate.sql
@@ -142,8 +147,8 @@ jobs:
           path: artifacts/mcp
       - uses: actions/upload-artifact@v7
         with:
-          name: import
-          path: artifacts/import
+          name: import-webjob
+          path: artifacts/weather-import.zip
       - uses: actions/upload-artifact@v7
         with:
           name: database

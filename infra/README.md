@@ -15,7 +15,7 @@ suffix is `yqwclkoqjorko`.
 | App Service plan | `weather-free-plan` | Linux **F1 / Free**; shared by both backend hosts |
 | REST/SignalR web app | `weather-yqwclkoqjorko-api` | .NET 10; existing REST endpoints and `/weatherHub` |
 | MCP web app | `weather-yqwclkoqjorko-mcp` | .NET 10; `/mcp`, including SQL history |
-| Static Web App | `weather-yqwclkoqjorko-ui` | **Free**; hosts the built React dashboard instead of Vercel |
+| Static Web App | `weather-yqwclkoqjorko-ui` | **Free**; hosts the built React dashboard |
 | SQL logical server | `weather-yqwclkoqjorko-sql-westus3` | Entra-only authentication; existing human administrator |
 | SQL database | `weather-db` | **Free offer**, `GP_S_Gen5`, 2 vCores, maximum 32 GiB; pauses at the free limit |
 
@@ -23,6 +23,7 @@ These configuration/child resources are also part of the template:
 
 | Child resource | Quantity | Purpose |
 | --- | --- | --- |
+| API `config/web` | 1 | Enables the Linux WebJobs runtime while retaining the free hosting settings |
 | Web-app `config/appsettings` | 2 | Ambient secrets, managed-identity SQL connection, hostnames, and UI CORS origin |
 | Web-app `basicPublishingCredentialsPolicies/scm` and `/ftp` | 4 | Disable password-based publishing for both hosts |
 | SQL `firewallRules/AllowAzureServices` | 1 | Allows Azure-hosted clients through the SQL network firewall; Entra authentication is still required |
@@ -32,7 +33,8 @@ These configuration/child resources are also part of the template:
 Azure also creates two **system-assigned managed identities**, one per web app,
 and the SQL server's system `master` database. They have no separate hosting SKU.
 SQL authorization is an explicit post-provisioning step: an API user with CONNECT
-permission and an MCP user with CONNECT plus SELECT on `dbo.DeviceData`.
+plus SELECT/INSERT on `dbo.DeviceData` for the API's on-demand import WebJob, and
+an MCP user with CONNECT plus SELECT on that table.
 The existing administrator account is reused; no human Entra user, user-assigned
 identity, app registration, role assignment, or GitHub OIDC identity is created.
 ARM also records the `weather-free-stack` module deployment (no hosting charge).
@@ -41,7 +43,7 @@ No Azure SignalR service is needed: the existing API hosts SignalR itself. There
 is no Azure Functions app, storage account, Container Registry, Key Vault, Log
 Analytics workspace, Application Insights, Front Door, private endpoint, paid
 certificate, custom domain purchase, or scheduled import job in this plan.
-No Vercel service is used. This change does not delete the existing Vercel project.
+An on-demand `weather-import` WebJob is packaged with the API on the existing plan.
 
 ## What free means here
 
@@ -179,22 +181,22 @@ dotnet ef database update --project src/Weather.Infrastructure --configuration R
 ```
 
 Run the generated `artifacts/authorize-apps.sql` **in weather-db** using an Azure
-SQL client authenticated as the Entra administrator. This grants only CONNECT to
-the API's identity (for connectivity checks) and CONNECT/SELECT on `dbo.DeviceData`
-to the MCP identity. It creates external users from managed identity **client-ID** SIDs without granting
+SQL client authenticated as the Entra administrator. This grants CONNECT and
+SELECT/INSERT on `dbo.DeviceData` to the API identity for its on-demand WebJob,
+and CONNECT/SELECT to the MCP identity. It creates external users from managed identity **client-ID** SIDs without granting
 the SQL server Microsoft Graph directory-reader permissions. ARM principal IDs are object IDs; the helper resolves their appId/client IDs before rendering SQL. Reruns refuse mismatched identities.
 
-If initial history is needed, explicitly run `dotnet run --project src/Weather.Import -c Release` with the administrator connection and the existing Ambient settings.
-The importer is a one-shot tool, not a permanently hosted job. Its writes and
-pagination still consume the database/Ambient allowances. Close the database
-client and remove the operator firewall rule after maintenance.
+Use the on-demand `weather-import` WebJob to fetch new history after the schema
+and grants are ready. It inherits the API app settings and uses the API's managed
+identity. Its writes and pagination consume SQL, Ambient, and F1 allowances. See
+[WebJob operations](../docs/deployment.md#import-webjob). Close database clients
+and remove temporary operator firewall rules after maintenance.
 
 ### Publish the two .NET hosts
 
 ```powershell
-dotnet publish src/Weather.WebApi -c Release -o artifacts/webapi
+./infra/Publish-WebApi.ps1
 dotnet publish src/Weather.Mcp -c Release -o artifacts/mcp
-Compress-Archive -Path artifacts/webapi/* -DestinationPath artifacts/webapi.zip -Force
 Compress-Archive -Path artifacts/mcp/* -DestinationPath artifacts/mcp.zip -Force
 az webapp deploy -g weather -n $resources.api --src-path artifacts/webapi.zip --type zip
 az webapp deploy -g weather -n $resources.mcp --src-path artifacts/mcp.zip --type zip
@@ -223,18 +225,16 @@ Remove-Item Env:SWA_CLI_DEPLOYMENT_TOKEN
 
 Treat the SWA deployment token as a secret. Do not echo it or commit it. The
 `staticwebapp.config.json` in `ui/public/` is copied to `ui/dist/` for SPA fallback.
-There is no Vercel build, API proxy, linked Azure backend, or managed Functions API.
+The dashboard calls the REST/SignalR host directly over HTTPS.
 
 ### Verify the deployed flow
 
 Verify the dashboard at `$urls.ui`, REST `/Devices`, SignalR `/weatherHub/negotiate`
 and actual `weatherData` updates, plus MCP discovery/current-conditions/history at
 `$urls.mcp`. Verify both healthy and unavailable dependency responses. Database
-history is empty until the explicit importer runs; never fabricate readings.
+history comes from an explicit import or local-data copy; never fabricate readings.
 The low-cost liveness URL is `$urls.api/health`. Detailed health contacts SQL and
 Ambient and should not be used as an always-on keepalive or frequent quota consumer.
 The current deployment passed this flow on November 15, 2026; rerun live verification after subsequent deployments.
 
-If switching an existing domain/bookmark, first verify the Azure dashboard. Remove
-or disable the old Vercel project separately only after the Azure replacement is
-working; none of these templates manage external Vercel resources.
+Update dashboard bookmarks to the Azure URL listed in the deployment status.

@@ -136,7 +136,7 @@ public sealed class WeatherImportIntegrationTests : IClassFixture<HistoryDatabas
     public WeatherImportIntegrationTests(HistoryDatabase database) => this.database = database;
 
     [Fact]
-    public async Task ConsoleImportsEveryColumnAndRerunsSafelyWithAtomicConcurrentWrites()
+    public async Task WebJobImportsEveryColumnAndRerunsSafelyWithAtomicConcurrentWrites()
     {
         using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(60));
         var factory = database.Services.GetRequiredService<IDbContextFactory<WeatherHistoryContext>>();
@@ -210,7 +210,44 @@ public sealed class WeatherImportIntegrationTests : IClassFixture<HistoryDatabas
         Assert.Equal(3, await db.Readings.CountAsync(timeout.Token));
     }
 
-    private async Task<string> RunImportAsync(string ambientUrl, CancellationToken cancellationToken)
+    [Fact]
+    public async Task WebJobShutdownDuringPaginationLeavesNoPartialReadings()
+    {
+        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(30));
+        var factory = database.Services.GetRequiredService<IDbContextFactory<WeatherHistoryContext>>();
+        await using var db = await factory.CreateDbContextAsync(timeout.Token);
+        await db.Readings.ExecuteDeleteAsync(timeout.Token);
+        var shutdownFile = Path.Combine(Path.GetTempPath(), Guid.NewGuid() + ".shutdown");
+        using var reservation = new TcpListener(IPAddress.Loopback, 0);
+        reservation.Start();
+        var port = ((IPEndPoint)reservation.LocalEndpoint).Port;
+        reservation.Stop();
+        using var ambient = new HttpListener();
+        var url = $"http://127.0.0.1:{port}/";
+        ambient.Prefixes.Add(url);
+        ambient.Start();
+        var serve = Task.Run(async () =>
+        {
+            var context = await ambient.GetContextAsync().WaitAsync(timeout.Token);
+            var date = DateTime.UtcNow.AddMinutes(-1);
+            var json = JsonSerializer.Serialize(new[] { new { dateutc = new DateTimeOffset(date).ToUnixTimeMilliseconds(), date } });
+            try { await context.Response.OutputStream.WriteAsync(Encoding.UTF8.GetBytes(json), timeout.Token); }
+            finally { context.Response.Close(); }
+            // The importer must wait between pages; Kudu stops it while it has
+            // buffered data but has not reached the atomic write step.
+            await File.WriteAllTextAsync(shutdownFile, "", timeout.Token);
+        });
+        try
+        {
+            var output = await RunImportAsync(url, timeout.Token, shutdownFile, 130);
+            await serve;
+            Assert.Contains("Import canceled.", output);
+            Assert.Equal(0, await db.Readings.CountAsync(timeout.Token));
+        }
+        finally { File.Delete(shutdownFile); }
+    }
+
+    private async Task<string> RunImportAsync(string ambientUrl, CancellationToken cancellationToken, string? shutdownFile = null, int expectedExitCode = 0)
     {
         var root = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "../../../../../"));
         var configuration = new DirectoryInfo(AppContext.BaseDirectory).Parent!.Name;
@@ -218,6 +255,8 @@ public sealed class WeatherImportIntegrationTests : IClassFixture<HistoryDatabas
         var info = new ProcessStartInfo("dotnet") { UseShellExecute = false, CreateNoWindow = true,
             RedirectStandardOutput = true, RedirectStandardError = true };
         info.ArgumentList.Add(dll);
+        info.Environment.Remove("WEBJOBS_SHUTDOWN_FILE");
+        if (shutdownFile is not null) info.Environment["WEBJOBS_SHUTDOWN_FILE"] = shutdownFile;
         info.Environment["ConnectionStrings__sql"] = database.ConnectionString;
         info.Environment["Ambient__ApiUrl"] = ambientUrl;
         info.Environment["Ambient__ApiKey"] = "test-api";
@@ -228,7 +267,8 @@ public sealed class WeatherImportIntegrationTests : IClassFixture<HistoryDatabas
         var stderr = process.StandardError.ReadToEndAsync(cancellationToken);
         try { await process.WaitForExitAsync(cancellationToken); }
         finally { if (!process.HasExited) process.Kill(entireProcessTree: true); }
-        Assert.True(process.ExitCode == 0, await stderr);
-        return await stdout;
+        var error = await stderr;
+        Assert.True(process.ExitCode == expectedExitCode, error);
+        return await stdout + error;
     }
 }

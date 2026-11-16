@@ -124,6 +124,23 @@ public sealed class HttpAccessTests
         }
     }
 
+    [Fact]
+    public async Task ApiSpecificHostFilterOverridesSharedRuntimeConfiguration()
+    {
+        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(30));
+        var environment = BaseEnvironment();
+        environment["AllowedHosts"] = "*";
+        environment["WeatherHttp__AllowedHosts"] = "127.0.0.1";
+        await using var server = await HttpMcpServer.StartRestAsync(environment, timeout.Token);
+        using var http = new HttpClient { BaseAddress = server.Endpoint };
+        using var allowed = await http.GetAsync("/health", timeout.Token);
+        Assert.Equal(HttpStatusCode.OK, allowed.StatusCode);
+        using var request = new HttpRequestMessage(HttpMethod.Get, "/health");
+        request.Headers.Host = "untrusted.example";
+        using var rejected = await http.SendAsync(request, timeout.Token);
+        Assert.Equal(HttpStatusCode.BadRequest, rejected.StatusCode);
+    }
+
     private static Dictionary<string, string?> BaseEnvironment() => new()
     {
         ["Ambient__ApiKey"] = "", ["Ambient__ApplicationKey"] = "",

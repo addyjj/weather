@@ -22,7 +22,7 @@ test("the resource inventory cannot silently add metered supporting services", (
     "Microsoft.Sql/servers/databases/backupShortTermRetentionPolicies": 1,
     "Microsoft.Sql/servers/firewallRules": 2,
     "Microsoft.Web/sites": 2,
-    "Microsoft.Web/sites/config": 2,
+    "Microsoft.Web/sites/config": 3,
     "Microsoft.Web/sites/basicPublishingCredentialsPolicies": 4,
   });
   assert.equal(Object.keys(stack.parameters).some((name) => /sku|tier|capacity|exhaustion/i.test(name)), false);
@@ -40,6 +40,14 @@ test("hosting stays on fixed Free SKUs with no always-on or scaled workers", () 
     assert.equal(app.properties.siteConfig.linuxFxVersion, "DOTNETCORE|10.0");
     assert.equal(app.properties.serverFarmId.includes("Microsoft.Web/serverfarms"), true);
   }
+});
+
+test("the API enables the WebJobs runtime while retaining F1-compatible settings", () => {
+  const webConfig = ofType("Microsoft.Web/sites/config").find((resource) => resource.properties.webJobsEnabled);
+  assert.ok(webConfig);
+  assert.equal(webConfig.properties.webJobsEnabled, true);
+  assert.equal(webConfig.properties.alwaysOn, false);
+  assert.equal(webConfig.properties.linuxFxVersion, "DOTNETCORE|10.0");
 });
 
 test("SQL stops at the free allowance, caps data at 32 GiB, and avoids paid backup options", () => {
@@ -63,10 +71,10 @@ test("SQL uses existing Entra admin and scoped app identities rather than passwo
     assert.equal(app.identity.type, "SystemAssigned");
     assert.equal(app.properties.httpsOnly, true);
   }
-  for (const setting of ofType("Microsoft.Web/sites/config")) {
+  for (const setting of ofType("Microsoft.Web/sites/config").filter((resource) => typeof resource.properties === "string")) {
     assert.match(setting.properties, /Authentication=Active Directory Managed Identity/);
   }
-  assert.equal(ofType("Microsoft.Web/sites/config").every((setting) => setting.properties.includes("Pooling=False")), true);
+  assert.equal(ofType("Microsoft.Web/sites/config").filter((resource) => typeof resource.properties === "string").every((setting) => setting.properties.includes("Pooling=False")), true);
   assert.equal(ofType("Microsoft.Web/sites/basicPublishingCredentialsPolicies").every((policy) => policy.properties.allow === false), true);
 });
 
@@ -80,9 +88,14 @@ test("Ambient credentials stay secure inputs and are never deployment outputs", 
 });
 
 test("UI CORS uses the provisioned Azure hostname and operator SQL access is opt-in", () => {
-  const settings = ofType("Microsoft.Web/sites/config");
+  const settings = ofType("Microsoft.Web/sites/config").filter((resource) => typeof resource.properties === "string");
   const apiSettings = settings.find((setting) => setting.properties.includes("Cors__AllowedOrigins__0"));
   assert.match(apiSettings.properties, /defaultHostname/);
+  assert.match(apiSettings.properties, /WEBSITE_SKIP_RUNNING_KUDUAGENT/);
+  assert.match(apiSettings.properties, /WeatherHttp__AllowedHosts/);
+  assert.doesNotMatch(apiSettings.properties, /\x27AllowedHosts\x27/);
+  const mcpSettings = settings.find((setting) => !setting.properties.includes("Cors__AllowedOrigins__0"));
+  assert.doesNotMatch(mcpSettings.properties, /WEBSITE_SKIP_RUNNING_KUDUAGENT/);
   assert.equal(JSON.stringify(stack).includes("vercel"), false);
   const operatorRule = ofType("Microsoft.Sql/servers/firewallRules").find((rule) => rule.condition);
   assert.equal(operatorRule.condition, "[not(empty(parameters('operatorIpAddress')))]");

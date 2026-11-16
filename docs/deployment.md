@@ -17,7 +17,7 @@ It does not load ignored host settings. With no environment setting, it uses a
 localhost `weather` database connection string; script generation and model checks
 do not connect. Always set the intended connection explicitly before database updates.
 
-The migration chain preserves `20260213032620_InitialCreate` from Weather.Api. A
+The migration chain preserves the original `20260213032620_InitialCreate`. A
 second migration aligns `Loc` with `varchar(100)`, `Date` with `datetime`, and the
 table with the explicit `dbo` schema used by the current application. It refuses
 changes that would lose location characters or timestamp range/precision. Such
@@ -126,24 +126,70 @@ and configuration precedence.
 
 ## Azure-only free-tier infrastructure and hosting
 
-The current hosting proposal is declared in `infra/main.bicep`. See the
+The current hosting configuration is declared in `infra/main.bicep`. See the
 [complete resource inventory, free limits, and review-first deployment steps](../infra/README.md).
 It uses Static Web Apps Free for the dashboard, a shared F1 Linux App Service plan
 for REST/SignalR and MCP, and the Azure SQL free offer with monthly-limit AutoPause.
 The UI calls the API directly over HTTPS; its production build receives the actual
 API URL via `VITE_API_BASE_URL`. The Bicep template sets the matching CORS origin.
-Vercel and Static Web Apps paid linked-backend features are not required.
 
 App Service and SQL target West US 3; Static Web Apps remains in West US 2.
 West US 2 SQL provisioning failed despite a successful what-if. Run the SQL regional
 capability check and full `what-if` before every deployment. Never substitute a
 paid SKU or enable SQL paid overages to bypass a quota failure.
 
-The old weather resource group and its deployment identity were deleted. The
-former GitHub secrets, Azure OIDC assumptions, App Service settings, and Vercel
-origin are not used by this plan. Initial deployment uses the authenticated human
-Azure CLI session. Runtime SQL access uses the web apps' system-assigned managed
+Deployment uses the authenticated human Azure CLI session. Runtime SQL access uses
+the web apps' system-assigned managed
 identities and explicit least-privilege database grants; no SQL password is stored.
+
+## Import WebJob
+
+The on-demand `weather-import` WebJob is packaged under the API site's
+`App_Data/jobs/triggered/weather-import` directory. It uses the API's managed
+identity and app settings. The API identity needs CONNECT and SELECT/INSERT on
+`dbo.DeviceData`; rerun `infra/Write-DatabaseAuthorization.ps1` and execute the
+generated SQL as the Entra administrator when upgrading an existing deployment.
+MCP keeps SELECT-only access. No identity gets UPDATE, DELETE, or schema permissions.
+
+Build the API and its self-contained Linux x64 WebJob together:
+
+```powershell
+./infra/Publish-WebApi.ps1
+az webapp deploy -g weather -n $resources.api --src-path artifacts/webapi.zip --type zip
+```
+
+The publisher also creates `artifacts/weather-import.zip` for a standalone
+WebJob upload. To update just the job without replacing the API's files:
+
+```powershell
+az webapp deploy -g weather -n $resources.api --src-path artifacts/weather-import.zip --type zip --target-path /home/site/wwwroot/App_Data/jobs/triggered/weather-import --clean true --restart false
+```
+
+Linux WebJobs require the API app setting `WEBSITE_SKIP_RUNNING_KUDUAGENT=false`,
+declared in Bicep together with `config/web.webJobsEnabled=true`. Both switches
+are required on the deployed App Service. HTTP 409 from the WebJobs API means
+the runtime is disabled. The API uses `WeatherHttp__AllowedHosts` instead of a
+global `AllowedHosts` setting: KuduAgent inherits global .NET settings and would
+reject its own internal management requests. Remove the old API `AllowedHosts`
+app setting when upgrading; MCP's setting remains unchanged. Keep basic publishing
+credentials disabled.
+
+In Azure Portal, open the REST API App Service, select **WebJobs**, select
+**weather-import**, and select **Run**. Its run details show progress and the
+success/failure status. Never expose the import as an unauthenticated REST route.
+A successful rerun skips readings already stored.
+
+The job has no schedule. It exits after one import. It inherits
+`ConnectionStrings__sql` and `Ambient__ApiKey/ApplicationKey/DeviceMacAddress`
+from the API app; no local settings or credentials are bundled. Shutdown via
+SIGTERM/Ctrl+C or Kudu's `WEBJOBS_SHUTDOWN_FILE` cancels pending work and rolls back
+an incomplete import. Logs omit connection strings, keys, and upstream errors.
+
+[WebJobs run on the existing App Service plan](https://learn.microsoft.com/en-us/azure/app-service/webjobs-create)
+and share its CPU, memory, storage, and lifetime. Free F1 cannot enable Always On:
+a sleeping app or exhausted quota can interrupt a run. For a future schedule,
+review that limitation before adding a schedule to `settings.job`; reliable
+scheduled operation requires a hosting decision. No paid tier is enabled here.
 
 ## GitHub Actions verification and artifacts
 
@@ -151,7 +197,7 @@ identities and explicit least-privilege database grants; no SQL password is stor
 and manual dispatch. It builds/tests .NET with disposable LocalDB, builds/tests the
 UI and Storybook, runs browser workflows in proxy and cross-origin modes, validates
 the free-only Bicep resource inventory, and validates/smoke-tests the Docker images.
-After all verification jobs pass, it publishes downloadable webapi, MCP, importer,
+After all verification jobs pass, it publishes downloadable webapi (including its WebJob), MCP, import-webjob ZIP,
 UI, and database migration artifacts. It does not provision resources, deploy to
 Azure, apply migrations, or run imports on a push. Publishing an artifact in CI is
 not publishing the application to the internet.

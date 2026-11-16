@@ -45,7 +45,9 @@ test("database authorization resolves managed identity client IDs instead of usi
   assert.equal(result.sql.includes("$("), false);
   assert.ok(result.sql.includes("GRANT CONNECT TO [weather-api]"));
   assert.ok(result.sql.includes("GRANT SELECT ON OBJECT::dbo.DeviceData TO [weather-mcp]"));
-  assert.doesNotMatch(result.sql, /GRANT\s+(?:INSERT|UPDATE|DELETE|CONTROL)|db_owner/i);
+  assert.ok(result.sql.includes("GRANT SELECT, INSERT ON OBJECT::dbo.DeviceData TO [weather-api]"));
+  assert.doesNotMatch(result.sql, /GRANT\s+(?:UPDATE|DELETE|CONTROL)|db_owner/i);
+  assert.doesNotMatch(result.sql, /GRANT[^;\n]*INSERT[^;\n]*TO \[weather-mcp\]/i);
 });
 
 test("invalid identity metadata stops authorization generation before SQL is written", () => {

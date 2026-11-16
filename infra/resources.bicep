@@ -143,6 +143,24 @@ resource api 'Microsoft.Web/sites@2024-04-01' = {
   }
 }
 
+// The platform exposes this switch on config/web. Applying it only through
+// the site's siteConfig is ignored by some App Service API versions.
+resource apiWebJobsConfig 'Microsoft.Web/sites/config@2025-03-01' = {
+  parent: api
+  name: 'web'
+  properties: {
+    linuxFxVersion: 'DOTNETCORE|10.0'
+    appCommandLine: 'dotnet Weather.WebApi.dll'
+    alwaysOn: false
+    ftpsState: 'Disabled'
+    minTlsVersion: '1.2'
+    scmMinTlsVersion: '1.2'
+    http20Enabled: true
+    #disable-next-line BCP037 // Supported by config/web before Bicep's type catalog includes it.
+    webJobsEnabled: true
+  }
+}
+
 resource mcp 'Microsoft.Web/sites@2024-04-01' = {
   name: '${stem}-mcp'
   location: location
@@ -168,7 +186,8 @@ resource mcp 'Microsoft.Web/sites@2024-04-01' = {
 }
 
 // Pooling=False releases idle database sessions rather than preventing SQL's
-// serverless auto-pause. Runtime identities receive no schema/write permissions.
+// serverless auto-pause. The API WebJob gets scoped SELECT/INSERT grants;
+// MCP remains read-only. Neither identity receives schema permissions.
 var connectionString = 'Server=tcp:${sql.properties.fullyQualifiedDomainName},1433;Database=${database.name};Authentication=Active Directory Managed Identity;Encrypt=True;TrustServerCertificate=False;Connection Timeout=60;Pooling=False'
 var commonSettings = {
   ASPNETCORE_ENVIRONMENT: 'Production'
@@ -187,8 +206,10 @@ resource apiSettings 'Microsoft.Web/sites/config@2024-04-01' = {
   parent: api
   name: 'appsettings'
   properties: union(commonSettings, {
-    AllowedHosts: api.properties.defaultHostName
+    // A global AllowedHosts setting is inherited by KuduAgent and blocks jobs.
+    WeatherHttp__AllowedHosts: api.properties.defaultHostName
     Cors__AllowedOrigins__0: 'https://${ui.properties.defaultHostname}'
+    WEBSITE_SKIP_RUNNING_KUDUAGENT: 'false'
   })
 }
 

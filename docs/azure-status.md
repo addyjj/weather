@@ -30,23 +30,42 @@ Verified application flow:
 - MCP discovers both tools and successfully returns current conditions and a SQL history query.
 - The dashboard renders station readings, connects to SignalR, and receives a real
   `weatherData` event; the browser verification recorded no page errors.
-- All 125 .NET tests and nine infrastructure regression checks pass. UI build,
+- All 128 .NET tests and ten infrastructure regression checks pass. UI build,
   lint, component tests, and local proxy/cross-origin browser tests passed during preparation.
 
-The new history table is empty. No historical import or database restore was run.
-The API identity has CONNECT only; MCP has CONNECT and SELECT on `dbo.DeviceData`.
+On November 15, 2026, 505,907 readings were copied from the local SQL Express
+`weather.dbo.DeviceData` table into Azure. All 27 fields of every row were verified
+against the local source before committing. Stored readings span December 30,
+2021 through November 15, 2026 (UTC). Local data and Azure migration history were
+preserved. The live MCP history query also confirmed all 505,907 readings.
+The API identity has CONNECT and SELECT/INSERT on `dbo.DeviceData` for its import
+WebJob; MCP has CONNECT and SELECT only. Neither has schema, UPDATE, or DELETE grants.
 For manual SID-based external user creation, **managed identities use their client
 IDs, not ARM principal/object IDs**. `Write-DatabaseAuthorization.ps1` resolves the
 client IDs before rendering the SQL. Regression tests use different object/client
 IDs to protect this mapping.
 
 Temporary operator SQL firewall rules were removed after setup and troubleshooting.
+DataGrip access uses a separate `DataGripWorkstation` firewall rule restricted to
+this computer's public IPv4 address and Microsoft Entra sign-in. Update or remove
+that rule when the address changes or workstation access is no longer needed.
 Application startup was restored and all uploaded diagnostic files were removed.
 Ambient keys exist only in server-side app settings/secure deployment inputs; they
 are absent from the client build and committed configuration. No SQL password is used.
 
-The Azure-hosted dashboard has no Vercel dependency. The old Vercel project and
-old Git repositories were not deleted or modified by this deployment.
+Cleanup completed: the former Vercel project, standalone API/UI GitHub repositories,
+and their local checkouts have been deleted. Their Git histories remain preserved
+in the consolidated `addyjj/weather` repository.
+
+The API also hosts the triggered `weather-import` WebJob. It has no schedule.
+Its first Azure run succeeded, adding 299 readings from two Ambient history pages,
+bringing the total to 506,206. A second run succeeded with zero new readings,
+confirming safe reruns. The job uses inherited app settings and the API's managed identity. The job
+handles Kudu shutdown signals and emits periodic progress for longer backfills.
+Linux WebJobs require both `WEBSITE_SKIP_RUNNING_KUDUAGENT=false` and
+`config/web.webJobsEnabled=true`. API host filtering uses
+`WeatherHttp__AllowedHosts` to avoid interfering with KuduAgent. Basic publishing
+credentials and Always On remain disabled; the plan is still F1.
 
 See [the complete resource inventory and deployment guide](../infra/README.md)
 for future deployments, maintenance, limits, and database authorization commands.

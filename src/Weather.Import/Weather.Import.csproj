@@ -7,6 +7,7 @@
     <FrameworkReference Include="Microsoft.AspNetCore.App" />
     <ProjectReference Include="../Weather.UseCases/Weather.UseCases.csproj" />
     <ProjectReference Include="../Weather.Infrastructure/Weather.Infrastructure.csproj" />
+    <None Update="run.sh;settings.job" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
     <Content Include="appsettings.Local.json" Condition="Exists('appsettings.Local.json')" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="Never" />
   </ItemGroup>
 </Project>
